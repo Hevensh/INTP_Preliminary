@@ -7,7 +7,9 @@ images and 50 validation images per class.
 ## Kaggle notebook setup
 
 1. Add the Kaggle dataset `ambityga/imagenet100` as an Input.
-2. Enable a GPU and Internet access.
+2. Enable a T4/L4-or-newer GPU and Internet access. The current Kaggle PyTorch
+   image does not include `sm_60` kernels for the older Tesla P100; choose T4
+   rather than reinstalling PyTorch in the notebook.
 3. Clone the repository and run from its root:
 
 ```bash

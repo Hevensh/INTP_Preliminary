@@ -122,6 +122,31 @@ def _environment(device: torch.device) -> dict[str, Any]:
     return result
 
 
+def _validate_cuda_architecture(device: torch.device) -> None:
+    """Fail early when the Kaggle torch build cannot execute on its GPU."""
+
+    if device.type != "cuda":
+        return
+    capability = torch.cuda.get_device_capability(device)
+    compiled_arches = torch.cuda.get_arch_list()
+    supported = sorted(
+        {
+            (int(arch[3:]) // 10, int(arch[3:]) % 10)
+            for arch in compiled_arches
+            if arch.startswith("sm_") and arch[3:].isdigit()
+        }
+    )
+    if supported and capability < supported[0]:
+        gpu_name = torch.cuda.get_device_name(device)
+        formatted = " ".join(f"sm_{major}{minor}" for major, minor in supported)
+        raise RuntimeError(
+            f"GPU {gpu_name} has CUDA capability sm_{capability[0]}{capability[1]}, "
+            f"but this PyTorch build starts at sm_{supported[0][0]}{supported[0][1]} "
+            f"(compiled: {formatted}). On Kaggle, select a T4/L4 or newer GPU and "
+            "restart the session. Do not reinstall the preloaded torch stack."
+        )
+
+
 def _atomic_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -313,6 +338,7 @@ def main() -> None:
         device = torch.device(config.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is unavailable")
+    _validate_cuda_architecture(device)
     amp = bool(config.amp and device.type == "cuda")
 
     splits = discover_imagefolder_splits(config.data_root, expected_classes=config.num_classes)
