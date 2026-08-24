@@ -46,6 +46,7 @@ class TrainConfig:
     val_samples: int | None = None
     max_train_steps: int | None = None
     max_val_steps: int | None = None
+    progress_interval_seconds: float = 60.0
     resume: str | None = None
 
 
@@ -158,11 +159,16 @@ def _run_epoch(
     scaler: torch.amp.GradScaler,
     grad_clip_norm: float,
     max_steps: int | None,
+    epoch: int,
+    phase: str,
+    progress_interval_seconds: float,
 ) -> EpochMetrics:
     training = optimizer is not None
     model.train(training)
     total_loss = total_samples = top1_correct = top5_correct = 0
     started = time.perf_counter()
+    next_progress_at = started + progress_interval_seconds
+    total_steps = min(len(loader), max_steps if max_steps is not None else len(loader))
     context = torch.enable_grad if training else torch.no_grad
     with context():
         for step, (images, targets) in enumerate(loader):
@@ -190,6 +196,32 @@ def _run_epoch(
             total_samples += count
             top1_correct += correct1
             top5_correct += correct5
+            now = time.perf_counter()
+            if progress_interval_seconds > 0 and now >= next_progress_at:
+                elapsed = now - started
+                completed_steps = step + 1
+                estimated_total = elapsed * total_steps / completed_steps
+                progress: dict[str, Any] = {
+                    "event": "progress",
+                    "phase": phase,
+                    "epoch": epoch,
+                    "step": completed_steps,
+                    "steps": total_steps,
+                    "progress_percent": round(100.0 * completed_steps / total_steps, 2),
+                    "loss": total_loss / total_samples,
+                    "top1": top1_correct / total_samples,
+                    "learning_rate": optimizer.param_groups[0]["lr"] if optimizer is not None else None,
+                    "samples_per_second": total_samples / elapsed,
+                    "elapsed_seconds": elapsed,
+                    "eta_seconds": max(estimated_total - elapsed, 0.0),
+                }
+                if device.type == "cuda":
+                    progress["peak_cuda_allocated_mib"] = (
+                        torch.cuda.max_memory_allocated(device) / 1024**2
+                    )
+                print(json.dumps(progress, ensure_ascii=False), flush=True)
+                intervals_elapsed = math.floor(elapsed / progress_interval_seconds) + 1
+                next_progress_at = started + intervals_elapsed * progress_interval_seconds
     if total_samples == 0:
         raise RuntimeError("epoch processed zero samples")
     seconds = time.perf_counter() - started
@@ -375,6 +407,9 @@ def main() -> None:
             scaler=scaler,
             grad_clip_norm=config.grad_clip_norm,
             max_steps=config.max_train_steps,
+            epoch=epoch,
+            phase="train",
+            progress_interval_seconds=config.progress_interval_seconds,
         )
         val_metrics = _run_epoch(
             model=model,
@@ -387,6 +422,9 @@ def main() -> None:
             scaler=scaler,
             grad_clip_norm=config.grad_clip_norm,
             max_steps=config.max_val_steps,
+            epoch=epoch,
+            phase="val",
+            progress_interval_seconds=config.progress_interval_seconds,
         )
         record = {
             "epoch": epoch,

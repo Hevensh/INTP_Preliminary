@@ -22,5 +22,6 @@
   "val_samples": null,
   "max_train_steps": null,
   "max_val_steps": null,
+  "progress_interval_seconds": 60.0,
   "resume": null
 }
