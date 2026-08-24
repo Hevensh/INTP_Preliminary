@@ -1,0 +1,25 @@
+data
+!scripts/
+scripts/data/
+*__pycache__
+checkpoints
+archive/
+.triton_cache/
+diagnostics/
+references/
+visualization/
+imgs/
+diagnostics/results/_smoke_*.json
+diagnostics/results/_smoke_*.pt
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pickle
+*.pkl
+.env
+.env.*
+!.env.example
+my_snapshot.pickle
+# *.ipynb

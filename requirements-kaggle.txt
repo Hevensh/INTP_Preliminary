@@ -1,0 +1,5 @@
+# Kaggle already provides a CUDA-enabled torch/torchvision stack. Do not
+# reinstall it; only add the lightweight Python dependencies used here.
+timm>=1.0.9
+huggingface-hub>=0.24
+safetensors>=0.4
