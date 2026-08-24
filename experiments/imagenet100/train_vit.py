@@ -341,7 +341,34 @@ def main() -> None:
     _validate_cuda_architecture(device)
     amp = bool(config.amp and device.type == "cuda")
 
+    print(
+        json.dumps(
+            {
+                "event": "start",
+                "experiment_name": config.experiment_name,
+                "device": str(device),
+                "data_root": config.data_root,
+                "epochs": config.epochs,
+                "batch_size": config.batch_size,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     splits = discover_imagefolder_splits(config.data_root, expected_classes=config.num_classes)
+    print(
+        json.dumps(
+            {
+                "event": "dataset_discovered",
+                "train_roots": [str(path) for path in splits.train],
+                "val_root": str(splits.val),
+                "classes": len(splits.classes),
+                "next": "indexing image paths; this can take several minutes on Kaggle storage",
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     train_loader, val_loader, full_train_size, full_val_size = build_imagefolder_loaders(
         splits,
         image_size=config.image_size,
@@ -350,6 +377,18 @@ def main() -> None:
         pin_memory=device.type == "cuda",
         train_samples=config.train_samples,
         val_samples=config.val_samples,
+    )
+    print(
+        json.dumps(
+            {
+                "event": "dataset_indexed",
+                "train_images": full_train_size,
+                "val_images": full_val_size,
+                "next": "building model",
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
     )
     model = timm.create_model(
         config.model,
@@ -422,6 +461,12 @@ def main() -> None:
     history: list[dict[str, Any]] = []
     training_started = time.perf_counter()
     for epoch in range(start_epoch, config.epochs + 1):
+        print(
+            json.dumps(
+                {"event": "epoch_start", "phase": "train", "epoch": epoch, "epochs": config.epochs}
+            ),
+            flush=True,
+        )
         train_metrics = _run_epoch(
             model=model,
             loader=train_loader,
@@ -436,6 +481,12 @@ def main() -> None:
             epoch=epoch,
             phase="train",
             progress_interval_seconds=config.progress_interval_seconds,
+        )
+        print(
+            json.dumps(
+                {"event": "epoch_start", "phase": "val", "epoch": epoch, "epochs": config.epochs}
+            ),
+            flush=True,
         )
         val_metrics = _run_epoch(
             model=model,

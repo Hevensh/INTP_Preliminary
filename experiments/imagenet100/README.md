@@ -53,3 +53,7 @@ Training does not use a per-batch progress bar. By default it emits one compact
 JSON progress record every 60 seconds with the current phase, epoch, batch
 percentage, running loss/Top-1, learning rate, throughput, ETA, and peak CUDA
 allocation. Change `progress_interval_seconds` in the JSON config if needed.
+Startup records are printed immediately before dataset discovery, image-path
+indexing, model construction, and each train/validation phase. Indexing the
+135,000 Kaggle-mounted files may take several minutes, but it is no longer a
+silent step.
