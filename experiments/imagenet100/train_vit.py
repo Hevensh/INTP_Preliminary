@@ -63,8 +63,8 @@ class TrainConfig:
     rot_use_null: bool = True
     rot_null_initial_score: float = -1.0
     rot_score_normalization: str = "none"
-    rot_routing_score_mode: str = "same"
     rot_response_gate: str = "exp2"
+    rot_response_gate_location: str = "pose"
     rot_score_clamp: float = 4.0
 
 
@@ -500,8 +500,8 @@ def main() -> None:
         rot_use_null=config.rot_use_null,
         rot_null_initial_score=config.rot_null_initial_score,
         rot_score_normalization=config.rot_score_normalization,
-        rot_routing_score_mode=config.rot_routing_score_mode,
         rot_response_gate=config.rot_response_gate,
+        rot_response_gate_location=config.rot_response_gate_location,
         rot_score_clamp=config.rot_score_clamp,
     ).to(device)
     if distributed.enabled:

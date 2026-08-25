@@ -34,7 +34,7 @@
   "rot_use_null": true,
   "rot_null_initial_score": -1.0,
   "rot_score_normalization": "patch_global",
-  "rot_routing_score_mode": "centered_raw",
   "rot_response_gate": "exp",
+  "rot_response_gate_location": "group",
   "rot_score_clamp": 4.0
 }

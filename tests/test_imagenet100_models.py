@@ -80,3 +80,36 @@ def test_rotating_hex_patch_embed_forward_and_backward():
     output.square().mean().backward()
     assert embed.prototype.grad is not None
     assert torch.isfinite(embed.prototype.grad).all()
+
+
+def test_rotating_hex_group_exp_matches_explicit_pose_aggregation():
+    embed = HexRotatingPolarPatchEmbed(
+        img_size=32,
+        in_chans=3,
+        embed_dim=12,
+        lattice_stride=8,
+        kernel_sizes=(12, 6),
+        bases=4,
+        directions=4,
+        global_directions=8,
+        radial_bins=4,
+        prototype_chunk_size=4,
+        null_initial_score=-1,
+        score_normalization="patch_global",
+        response_gate="exp",
+        response_gate_location="group",
+    )
+    scores = torch.randn(2, 3, 4, 2, 4)
+    actual = embed._chunk_output(scores, 0, 4)
+
+    null = embed.null_score[None, None, :, None].expand(2, 3, -1, -1)
+    probabilities = torch.cat((scores.flatten(3, 4), null), -1).softmax(-1)[..., :-1]
+    probabilities = probabilities.view_as(scores)
+    group_amplitude = torch.exp((probabilities * scores).sum((3, 4)))
+    direction_value = torch.einsum(
+        "dk,pkc->pdc", embed.direction_coefficients, embed.direction_pair
+    )
+    pose_value = direction_value[:, None] + embed.scale_value[:, :, None]
+    expected = torch.einsum("qnpsd,psdc->qnpc", probabilities, pose_value)
+    expected = (expected * group_amplitude[..., None]).sum(2)
+    torch.testing.assert_close(actual, expected)

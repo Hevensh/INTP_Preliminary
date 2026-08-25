@@ -90,8 +90,8 @@ class HexRotatingPolarPatchEmbed(nn.Module):
         use_null: bool = True,
         null_initial_score: float = -1.0,
         score_normalization: str = "none",
-        routing_score_mode: str = "same",
         response_gate: str = "exp2",
+        response_gate_location: str = "pose",
         score_clamp: float = 4.0,
     ) -> None:
         super().__init__()
@@ -111,13 +111,13 @@ class HexRotatingPolarPatchEmbed(nn.Module):
             raise ValueError("score_normalization must be none or patch_global")
         if response_gate not in {"exp2", "exp"}:
             raise ValueError("response_gate must be exp2 or exp")
-        if routing_score_mode not in {"same", "centered_raw"}:
-            raise ValueError("routing_score_mode must be same or centered_raw")
+        if response_gate_location not in {"pose", "group"}:
+            raise ValueError("response_gate_location must be pose or group")
         if score_clamp <= 0:
             raise ValueError("score_clamp must be positive")
         self.score_normalization = score_normalization
-        self.routing_score_mode = routing_score_mode
         self.response_gate = response_gate
+        self.response_gate_location = response_gate_location
         self.score_clamp = float(score_clamp)
 
         self.geometries = nn.ModuleList(
@@ -213,12 +213,11 @@ class HexRotatingPolarPatchEmbed(nn.Module):
 
     def _chunk_output(
         self,
-        routing_scores: torch.Tensor,
-        gate_scores: torch.Tensor,
+        scores: torch.Tensor,
         start: int,
         stop: int,
     ) -> torch.Tensor:
-        flat_scores = routing_scores.flatten(3, 4)
+        flat_scores = scores.flatten(3, 4)
         if self.use_null:
             null = self.null_score[start:stop][None, None, :, None].expand(
                 flat_scores.shape[0], flat_scores.shape[1], -1, -1
@@ -226,13 +225,23 @@ class HexRotatingPolarPatchEmbed(nn.Module):
             weights = torch.cat((flat_scores, null), dim=-1).softmax(-1)[..., :-1]
         else:
             weights = flat_scores.softmax(-1)
-        weights = weights.view_as(routing_scores)
-        gate = (
-            torch.exp(gate_scores)
-            if self.response_gate == "exp"
-            else torch.exp2(gate_scores)
-        )
-        weights = weights * gate
+        probabilities = weights.view_as(scores)
+        if self.response_gate_location == "pose":
+            gate = (
+                torch.exp(scores)
+                if self.response_gate == "exp"
+                else torch.exp2(scores)
+            )
+            weights = probabilities * gate
+            group_amplitude = None
+        else:
+            group_score = (probabilities * scores).sum(dim=(3, 4))
+            group_amplitude = (
+                torch.exp(group_score)
+                if self.response_gate == "exp"
+                else torch.exp2(group_score)
+            )
+            weights = probabilities
 
         # Algebraically factor pose values instead of materializing P x S x D x C:
         # V[p,s,d] = A[p] cos(theta[d]) + B[p] sin(theta[d]) + Vscale[p,s].
@@ -243,6 +252,13 @@ class HexRotatingPolarPatchEmbed(nn.Module):
             "qnpsd,d->qnp", weights, self.direction_coefficients[:, 1]
         )
         scale_mass = weights.sum(-1)
+        if group_amplitude is not None:
+            # Multiplying the per-base scalar after its four-V aggregation is
+            # exactly equivalent to scaling these three sufficient statistics,
+            # and avoids materializing B x N x P x C base outputs.
+            cosine_mass = cosine_mass * group_amplitude
+            sine_mass = sine_mass * group_amplitude
+            scale_mass = scale_mass * group_amplitude[..., None]
         pair = self.direction_pair[start:stop]
         output = torch.einsum("qnp,pc->qnc", cosine_mass, pair[:, 0])
         output = output + torch.einsum("qnp,pc->qnc", sine_mass, pair[:, 1])
@@ -264,27 +280,17 @@ class HexRotatingPolarPatchEmbed(nn.Module):
                 for start in range(0, self.bases, self.prototype_chunk_size)
             ]
             raw_scores = torch.cat(score_chunks, dim=2)
-            gate_scores = raw_scores
+            scores = raw_scores
             if self.score_normalization == "patch_global":
                 variance, mean = torch.var_mean(
                     raw_scores, dim=(2, 3, 4), unbiased=False, keepdim=True
                 )
-                gate_scores = (raw_scores - mean) * torch.rsqrt(variance + 1e-6)
-                gate_scores = gate_scores.clamp(-self.score_clamp, self.score_clamp)
-            routing_scores = gate_scores
-            if self.routing_score_mode == "centered_raw":
-                # Subtracting one common value from a base's real poses leaves
-                # their softmax ratios unchanged while putting null in a stable
-                # relative coordinate system.  Do not divide by std here:
-                # that would silently change routing temperature.
-                routing_scores = raw_scores - raw_scores.mean(
-                    dim=(3, 4), keepdim=True
-                )
+                scores = (raw_scores - mean) * torch.rsqrt(variance + 1e-6)
+                scores = scores.clamp(-self.score_clamp, self.score_clamp)
             output = None
             for start in range(0, self.bases, self.prototype_chunk_size):
                 chunk = self._chunk_output(
-                    routing_scores[:, :, start : start + self.prototype_chunk_size],
-                    gate_scores[:, :, start : start + self.prototype_chunk_size],
+                    scores[:, :, start : start + self.prototype_chunk_size],
                     start,
                     min(start + self.prototype_chunk_size, self.bases),
                 )
