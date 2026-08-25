@@ -55,6 +55,12 @@ class TrainConfig:
     resume: str | None = None
     hex_kernel_size: int = 21
     hex_stride: int = 18
+    rot_kernel_sizes: tuple[int, ...] = (24, 12)
+    rot_bases: int = 96
+    rot_directions: int = 4
+    rot_global_directions: int = 8
+    rot_prototype_chunk_size: int = 16
+    rot_use_null: bool = True
 
 
 @dataclass(frozen=True)
@@ -481,6 +487,12 @@ def main() -> None:
         image_size=config.image_size,
         hex_kernel_size=config.hex_kernel_size,
         hex_stride=config.hex_stride,
+        rot_kernel_sizes=tuple(config.rot_kernel_sizes),
+        rot_bases=config.rot_bases,
+        rot_directions=config.rot_directions,
+        rot_global_directions=config.rot_global_directions,
+        rot_prototype_chunk_size=config.rot_prototype_chunk_size,
+        rot_use_null=config.rot_use_null,
     ).to(device)
     if distributed.enabled:
         model = DistributedDataParallel(
