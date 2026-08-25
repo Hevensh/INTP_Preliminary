@@ -25,6 +25,10 @@ def build_imagenet100_model(
     rot_global_directions: int = 8,
     rot_prototype_chunk_size: int = 16,
     rot_use_null: bool = True,
+    rot_null_initial_score: float = -1.0,
+    rot_score_normalization: str = "none",
+    rot_response_gate: str = "exp2",
+    rot_score_clamp: float = 4.0,
 ) -> nn.Module:
     """Build matched DeiT-Tiny models that differ only in patch embedding."""
 
@@ -65,6 +69,10 @@ def build_imagenet100_model(
             global_directions=rot_global_directions,
             prototype_chunk_size=rot_prototype_chunk_size,
             use_null=rot_use_null,
+            null_initial_score=rot_null_initial_score,
+            score_normalization=rot_score_normalization,
+            response_gate=rot_response_gate,
+            score_clamp=rot_score_clamp,
         )
     model.patch_embed = patch_embed
     model.pos_embed = nn.Parameter(

@@ -61,6 +61,10 @@ class TrainConfig:
     rot_global_directions: int = 8
     rot_prototype_chunk_size: int = 16
     rot_use_null: bool = True
+    rot_null_initial_score: float = -1.0
+    rot_score_normalization: str = "none"
+    rot_response_gate: str = "exp2"
+    rot_score_clamp: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -493,6 +497,10 @@ def main() -> None:
         rot_global_directions=config.rot_global_directions,
         rot_prototype_chunk_size=config.rot_prototype_chunk_size,
         rot_use_null=config.rot_use_null,
+        rot_null_initial_score=config.rot_null_initial_score,
+        rot_score_normalization=config.rot_score_normalization,
+        rot_response_gate=config.rot_response_gate,
+        rot_score_clamp=config.rot_score_clamp,
     ).to(device)
     if distributed.enabled:
         model = DistributedDataParallel(

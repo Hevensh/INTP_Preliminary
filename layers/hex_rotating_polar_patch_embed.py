@@ -88,6 +88,10 @@ class HexRotatingPolarPatchEmbed(nn.Module):
         angular_bins_per_radius: int = 4,
         prototype_chunk_size: int = 16,
         use_null: bool = True,
+        null_initial_score: float = -1.0,
+        score_normalization: str = "none",
+        response_gate: str = "exp2",
+        score_clamp: float = 4.0,
     ) -> None:
         super().__init__()
         if not kernel_sizes:
@@ -102,6 +106,15 @@ class HexRotatingPolarPatchEmbed(nn.Module):
         self.scales = len(kernel_sizes)
         self.prototype_chunk_size = int(prototype_chunk_size)
         self.use_null = bool(use_null)
+        if score_normalization not in {"none", "patch_global"}:
+            raise ValueError("score_normalization must be none or patch_global")
+        if response_gate not in {"exp2", "exp"}:
+            raise ValueError("response_gate must be exp2 or exp")
+        if score_clamp <= 0:
+            raise ValueError("score_clamp must be positive")
+        self.score_normalization = score_normalization
+        self.response_gate = response_gate
+        self.score_clamp = float(score_clamp)
 
         self.geometries = nn.ModuleList(
             HexPatchGeometry(img_size, in_chans, int(kernel), lattice_stride)
@@ -143,7 +156,7 @@ class HexRotatingPolarPatchEmbed(nn.Module):
         # independent scale value for each of the two default scales.
         self.direction_pair = nn.Parameter(torch.empty(bases, 2, embed_dim))
         self.scale_value = nn.Parameter(torch.empty(bases, self.scales, embed_dim))
-        self.null_score = nn.Parameter(torch.full((bases,), -1.0))
+        self.null_score = nn.Parameter(torch.full((bases,), float(null_initial_score)))
         self.output_bias = nn.Parameter(torch.zeros(embed_dim))
         nn.init.trunc_normal_(self.direction_pair, std=0.02)
         nn.init.trunc_normal_(self.scale_value, std=0.02)
@@ -167,7 +180,7 @@ class HexRotatingPolarPatchEmbed(nn.Module):
     def coo_patchs(self) -> torch.Tensor:
         return self.geometries[0].coo_patchs
 
-    def _chunk_output(
+    def _chunk_scores(
         self,
         patches: list[torch.Tensor],
         start: int,
@@ -192,7 +205,14 @@ class HexRotatingPolarPatchEmbed(nn.Module):
                 self.log2_distance_scale[start:stop, scale_index]
             )[None, None, :, None]
             scale_scores.append(score)
-        scores = torch.stack(scale_scores, dim=3)  # B, N, P, S, D
+        return torch.stack(scale_scores, dim=3)  # B, N, P, S, D
+
+    def _chunk_output(
+        self,
+        scores: torch.Tensor,
+        start: int,
+        stop: int,
+    ) -> torch.Tensor:
         flat_scores = scores.flatten(3, 4)
         if self.use_null:
             null = self.null_score[start:stop][None, None, :, None].expand(
@@ -201,12 +221,26 @@ class HexRotatingPolarPatchEmbed(nn.Module):
             weights = torch.cat((flat_scores, null), dim=-1).softmax(-1)[..., :-1]
         else:
             weights = flat_scores.softmax(-1)
-        weights = weights.view_as(scores) * torch.exp2(scores)
+        weights = weights.view_as(scores)
+        gate = torch.exp(scores) if self.response_gate == "exp" else torch.exp2(scores)
+        weights = weights * gate
 
+        # Algebraically factor pose values instead of materializing P x S x D x C:
+        # V[p,s,d] = A[p] cos(theta[d]) + B[p] sin(theta[d]) + Vscale[p,s].
+        cosine_mass = torch.einsum(
+            "qnpsd,d->qnp", weights, self.direction_coefficients[:, 0]
+        )
+        sine_mass = torch.einsum(
+            "qnpsd,d->qnp", weights, self.direction_coefficients[:, 1]
+        )
+        scale_mass = weights.sum(-1)
         pair = self.direction_pair[start:stop]
-        direction_value = torch.einsum("dk,pkc->pdc", self.direction_coefficients, pair)
-        value = direction_value[:, None] + self.scale_value[start:stop, :, None]
-        return torch.einsum("qnpsd,psdc->qnc", weights, value)
+        output = torch.einsum("qnp,pc->qnc", cosine_mass, pair[:, 0])
+        output = output + torch.einsum("qnp,pc->qnc", sine_mass, pair[:, 1])
+        output = output + torch.einsum(
+            "qnps,psc->qnc", scale_mass, self.scale_value[start:stop]
+        )
+        return output
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         # Distance calibration is deliberately float32; the transformer still
@@ -214,10 +248,25 @@ class HexRotatingPolarPatchEmbed(nn.Module):
         with torch.autocast(device_type=image.device.type, enabled=False):
             image = image.float()
             patches = [geometry(image) for geometry in self.geometries]
+            score_chunks = [
+                self._chunk_scores(
+                    patches, start, min(start + self.prototype_chunk_size, self.bases)
+                )
+                for start in range(0, self.bases, self.prototype_chunk_size)
+            ]
+            scores = torch.cat(score_chunks, dim=2)
+            if self.score_normalization == "patch_global":
+                variance, mean = torch.var_mean(
+                    scores, dim=(2, 3, 4), unbiased=False, keepdim=True
+                )
+                scores = (scores - mean) * torch.rsqrt(variance + 1e-6)
+                scores = scores.clamp(-self.score_clamp, self.score_clamp)
             output = None
             for start in range(0, self.bases, self.prototype_chunk_size):
                 chunk = self._chunk_output(
-                    patches, start, min(start + self.prototype_chunk_size, self.bases)
+                    scores[:, :, start : start + self.prototype_chunk_size],
+                    start,
+                    min(start + self.prototype_chunk_size, self.bases),
                 )
                 output = chunk if output is None else output + chunk
             return output + self.output_bias
