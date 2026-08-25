@@ -209,6 +209,40 @@ def _append_jsonl(path: Path, value: Any) -> None:
         handle.flush()
 
 
+def _duration(seconds: float) -> str:
+    seconds = max(int(round(seconds)), 0)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _progress_line(progress: dict[str, Any], *, epochs: int) -> str:
+    memory = progress.get("peak_cuda_allocated_mib")
+    memory_text = "" if memory is None else f" | mem {memory / 1024:.1f}G"
+    return (
+        f"[{progress['phase']} {progress['epoch']:02d}/{epochs:02d}] "
+        f"{progress['progress_percent']:5.1f}% "
+        f"({progress['step']}/{progress['steps']})"
+        f" | loss {progress['loss']:.3f}"
+        f" | top1 {100 * progress['top1']:.1f}%"
+        f" | {progress['samples_per_second']:.0f} img/s"
+        f" | eta {_duration(progress['eta_seconds'])}"
+        f"{memory_text}"
+    )
+
+
+def _epoch_line(epoch: int, train: EpochMetrics, val: EpochMetrics) -> str:
+    return (
+        f"[epoch {epoch:02d}] "
+        f"train loss {train.loss:.3f}, top1 {100 * train.top1:.2f}%"
+        f" | val loss {val.loss:.3f}, top1 {100 * val.top1:.2f}%, "
+        f"top5 {100 * val.top5:.2f}%"
+        f" | {_duration(train.seconds + val.seconds)}"
+    )
+
+
 def _cosine_lambda(step: int, *, total_steps: int, warmup_steps: int, min_ratio: float) -> float:
     if step < warmup_steps:
         return max((step + 1) / max(warmup_steps, 1), 1e-8)
@@ -235,6 +269,7 @@ def _run_epoch(
     grad_clip_norm: float,
     max_steps: int | None,
     epoch: int,
+    epochs: int,
     phase: str,
     progress_interval_seconds: float,
     distributed: DistributedContext,
@@ -295,7 +330,7 @@ def _run_epoch(
                     progress["peak_cuda_allocated_mib"] = (
                         torch.cuda.max_memory_allocated(device) / 1024**2
                     )
-                print(json.dumps(progress, ensure_ascii=False), flush=True)
+                print(_progress_line(progress, epochs=epochs), flush=True)
                 intervals_elapsed = math.floor(elapsed / progress_interval_seconds) + 1
                 next_progress_at = started + intervals_elapsed * progress_interval_seconds
     if total_samples == 0:
@@ -410,35 +445,16 @@ def main() -> None:
 
     if distributed.is_main:
         print(
-            json.dumps(
-                {
-                    "event": "start",
-                    "experiment_name": config.experiment_name,
-                    "device": str(device),
-                    "data_root": config.data_root,
-                    "epochs": config.epochs,
-                    "batch_size": config.batch_size,
-                    "per_device_batch_size": config.batch_size,
-                    "global_batch_size": config.batch_size * distributed.world_size,
-                    "world_size": distributed.world_size,
-                },
-                ensure_ascii=False,
-            ),
+            f"[start] {config.experiment_name} | {config.epochs} epochs"
+            f" | {distributed.world_size} GPU"
+            f" | batch {config.batch_size}/GPU"
+            f" (global {config.batch_size * distributed.world_size})",
             flush=True,
         )
     splits = discover_imagefolder_splits(config.data_root, expected_classes=config.num_classes)
     if distributed.is_main:
         print(
-            json.dumps(
-                {
-                    "event": "dataset_discovered",
-                    "train_roots": [str(path) for path in splits.train],
-                    "val_root": str(splits.val),
-                    "classes": len(splits.classes),
-                    "next": "indexing image paths; this can take several minutes on Kaggle storage",
-                },
-                ensure_ascii=False,
-            ),
+            f"[data] found {len(splits.classes)} classes; indexing image paths...",
             flush=True,
         )
     train_loader, val_loader, full_train_size, full_val_size = build_imagefolder_loaders(
@@ -454,15 +470,7 @@ def main() -> None:
     )
     if distributed.is_main:
         print(
-            json.dumps(
-                {
-                    "event": "dataset_indexed",
-                    "train_images": full_train_size,
-                    "val_images": full_val_size,
-                    "next": "building model",
-                },
-                ensure_ascii=False,
-            ),
+            f"[data] train {full_train_size:,} | val {full_val_size:,}; building model...",
             flush=True,
         )
     model = build_imagenet100_model(
@@ -543,7 +551,11 @@ def main() -> None:
     }
     if distributed.is_main:
         _atomic_json(run_dir / "model_summary.json", model_summary)
-        print(json.dumps({"event": "setup", **environment["dataset"], **environment["distributed"], **model_summary}, ensure_ascii=False))
+        print(
+            f"[model] {config.model_variant} | {model_summary['parameters']:,} params"
+            f" | {device}",
+            flush=True,
+        )
 
     start_epoch, best_top1 = 1, -1.0
     if config.resume is not None:
@@ -571,17 +583,7 @@ def main() -> None:
         if isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
         if distributed.is_main:
-            print(
-                json.dumps(
-                    {
-                        "event": "epoch_start",
-                        "phase": "train",
-                        "epoch": epoch,
-                        "epochs": config.epochs,
-                    }
-                ),
-                flush=True,
-            )
+            print(f"[epoch {epoch:02d}/{config.epochs:02d}] train", flush=True)
         train_metrics = _run_epoch(
             model=model,
             loader=train_loader,
@@ -594,22 +596,13 @@ def main() -> None:
             grad_clip_norm=config.grad_clip_norm,
             max_steps=config.max_train_steps,
             epoch=epoch,
+            epochs=config.epochs,
             phase="train",
             progress_interval_seconds=config.progress_interval_seconds,
             distributed=distributed,
         )
         if distributed.is_main:
-            print(
-                json.dumps(
-                    {
-                        "event": "epoch_start",
-                        "phase": "val",
-                        "epoch": epoch,
-                        "epochs": config.epochs,
-                    }
-                ),
-                flush=True,
-            )
+            print(f"[epoch {epoch:02d}/{config.epochs:02d}] validate", flush=True)
         val_metrics = _run_epoch(
             model=model,
             loader=val_loader,
@@ -622,6 +615,7 @@ def main() -> None:
             grad_clip_norm=config.grad_clip_norm,
             max_steps=config.max_val_steps,
             epoch=epoch,
+            epochs=config.epochs,
             phase="val",
             progress_interval_seconds=config.progress_interval_seconds,
             distributed=distributed,
@@ -650,7 +644,7 @@ def main() -> None:
             _save_checkpoint(run_dir / "last.pt", payload)
             if improved:
                 _save_checkpoint(run_dir / "best.pt", payload)
-            print(json.dumps(record, ensure_ascii=False))
+            print(_epoch_line(epoch, train_metrics, val_metrics), flush=True)
         if distributed.enabled:
             dist.barrier()
 
@@ -672,7 +666,13 @@ def main() -> None:
         )
     if distributed.is_main:
         _atomic_json(run_dir / "summary.json", summary)
-        print(json.dumps({"event": "complete", **summary}, ensure_ascii=False))
+        print(
+            f"[done] {config.experiment_name}"
+            f" | best val top1 {100 * best_top1:.2f}%"
+            f" | {_duration(summary['wall_seconds'])}"
+            f" | {run_dir}",
+            flush=True,
+        )
     if distributed.enabled:
         dist.barrier()
         dist.destroy_process_group()

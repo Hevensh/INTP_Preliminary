@@ -17,12 +17,12 @@ run_experiment() {
   local resume_args=()
 
   if [[ -f "${summary}" ]]; then
-    echo "{\"event\":\"skip_complete\",\"experiment_name\":\"${name}\",\"summary\":\"${summary}\"}"
+    echo "[skip] ${name} is already complete"
     return
   fi
   if [[ -f "${checkpoint}" ]]; then
     resume_args=(--resume "${checkpoint}")
-    echo "{\"event\":\"resume\",\"experiment_name\":\"${name}\",\"checkpoint\":\"${checkpoint}\"}"
+    echo "[resume] ${name} from ${checkpoint}"
   fi
 
   torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
@@ -34,7 +34,7 @@ run_experiment() {
     "${resume_args[@]}"
 }
 
-echo "{\"event\":\"suite_start\",\"gpus\":${NPROC_PER_NODE},\"per_device_batch_size\":${BATCH_SIZE},\"global_batch_size\":$((NPROC_PER_NODE * BATCH_SIZE))}"
+echo "[suite] ${NPROC_PER_NODE} GPUs | batch ${BATCH_SIZE}/GPU | global batch $((NPROC_PER_NODE * BATCH_SIZE))"
 
 if [[ "${RUN_BASELINE}" == "1" ]]; then
   run_experiment \
@@ -48,4 +48,4 @@ if [[ "${RUN_HEX}" == "1" ]]; then
     deit_tiny_hex_patch_imagenet100_ddp_e20
 fi
 
-echo "{\"event\":\"suite_complete\",\"output_root\":\"${OUTPUT_ROOT}\"}"
+echo "[suite done] outputs: ${OUTPUT_ROOT}"
