@@ -6,6 +6,7 @@ from layers.hex_linear_patch_embed import HexLinearPatchEmbed
 from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
 from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
+from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 
 
 def _build(variant: str):
@@ -174,4 +175,37 @@ def test_grouped_rotating_dot_model_keeps_hex_token_and_pe_shapes():
     assert isinstance(model.patch_embed, HexRotatingGroupedDotPatchEmbed)
     assert model.patch_embed.num_patches == 195
     assert model.patch_embed.group_dim == 64
+    assert model.pos_embed.shape == (1, 196, 192)
+
+
+def test_rotating_harmonic_embed_is_only_prototype_and_cosine_sine_output():
+    embed = HexRotatingHarmonicPatchEmbed(
+        img_size=32,
+        in_chans=3,
+        embed_dim=12,
+        lattice_stride=8,
+        kernel_sizes=(12, 6),
+        bases=6,
+        directions=4,
+        global_directions=8,
+        radial_bins=4,
+        prototype_chunk_size=2,
+    )
+    image = torch.randn(2, 3, 32, 32, requires_grad=True)
+    output = embed(image)
+    assert output.shape == (2, embed.num_patches, 12)
+    assert not hasattr(embed, "null_score")
+    assert not hasattr(embed, "direction_pair")
+    assert not hasattr(embed, "scale_value")
+    assert torch.allclose(embed.scale_cover_0.sum(), embed.scale_cover_1.sum())
+    assert torch.allclose(embed(2 * image), 2 * output, atol=1e-6, rtol=1e-5)
+    output.square().mean().backward()
+    assert torch.isfinite(embed.prototype.grad).all()
+
+
+def test_rotating_harmonic_model_keeps_hex_token_and_pe_shapes():
+    model = _build("rot_hex_harmonic_pe")
+    assert isinstance(model.patch_embed, HexRotatingHarmonicPatchEmbed)
+    assert model.patch_embed.num_patches == 195
+    assert model.patch_embed.bases * 2 == 192
     assert model.pos_embed.shape == (1, 196, 192)
