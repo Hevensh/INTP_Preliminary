@@ -27,6 +27,7 @@ def build_imagenet100_model(
     rot_use_null: bool = True,
     rot_null_initial_score: float = -1.0,
     rot_score_normalization: str = "none",
+    rot_routing_score_mode: str = "same",
     rot_response_gate: str = "exp2",
     rot_score_clamp: float = 4.0,
 ) -> nn.Module:
@@ -71,6 +72,7 @@ def build_imagenet100_model(
             use_null=rot_use_null,
             null_initial_score=rot_null_initial_score,
             score_normalization=rot_score_normalization,
+            routing_score_mode=rot_routing_score_mode,
             response_gate=rot_response_gate,
             score_clamp=rot_score_clamp,
         )

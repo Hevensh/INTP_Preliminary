@@ -20,7 +20,7 @@ if [[ -f "${CHECKPOINT}" ]]; then
   echo "[resume] ${NAME} from ${CHECKPOINT}"
 fi
 
-echo "[run] Rot-Hex Full-4 + PE | global score norm + exp | null -4"
+echo "[run] Rot-Hex Full-4 + PE | raw routing + normalized exp | null -1"
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
   -m experiments.imagenet100.train_vit \
   --config configs/imagenet100/deit_tiny_rot_hex_pe_normexp_ddp_e20.json \
