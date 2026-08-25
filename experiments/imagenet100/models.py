@@ -14,6 +14,7 @@ MODEL_VARIANTS = {
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
+    "rot_hex_harmonic_softmax_pe",
 }
 
 
@@ -122,6 +123,9 @@ def build_imagenet100_model(
             directions=rot_directions,
             global_directions=rot_global_directions,
             prototype_chunk_size=rot_prototype_chunk_size,
+            pose_softmax=variant == "rot_hex_harmonic_softmax_pe",
+            use_null=variant == "rot_hex_harmonic_softmax_pe",
+            null_initial_score=rot_null_initial_score,
         )
     model.patch_embed = patch_embed
     model.pos_embed = nn.Parameter(

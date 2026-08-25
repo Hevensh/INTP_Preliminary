@@ -27,6 +27,9 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         angular_bins_per_radius: int = 4,
         prototype_chunk_size: int = 16,
         prototype_std: float = 0.02,
+        pose_softmax: bool = False,
+        use_null: bool = False,
+        null_initial_score: float = 0.0,
     ) -> None:
         super().__init__()
         if not kernel_sizes:
@@ -42,6 +45,10 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         self.directions = int(directions)
         self.scales = len(kernel_sizes)
         self.prototype_chunk_size = int(prototype_chunk_size)
+        self.pose_softmax = bool(pose_softmax)
+        self.use_null = bool(use_null)
+        if self.use_null and not self.pose_softmax:
+            raise ValueError("use_null requires pose_softmax")
 
         self.geometries = nn.ModuleList(
             HexPatchGeometry(img_size, in_chans, int(kernel), lattice_stride)
@@ -79,6 +86,10 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         self.prototype = nn.Parameter(
             torch.randn(bases, in_chans, int(offsets[-1])) * prototype_std
         )
+        if self.use_null:
+            self.null_score = nn.Parameter(
+                torch.full((bases,), float(null_initial_score))
+            )
         self.output_bias = nn.Parameter(torch.zeros(embed_dim))
 
         reference_cover_mass = self.renderers[0].support_cover.sum()
@@ -126,6 +137,15 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
                 rendered,
             )
             pose_score = score if pose_score is None else pose_score + score
+
+        if self.pose_softmax:
+            if self.use_null:
+                null = self.null_score[start:stop][None, None, :, None].expand(
+                    pose_score.shape[0], pose_score.shape[1], -1, -1
+                )
+                pose_score = torch.cat((pose_score, null), dim=-1).softmax(-1)[..., :-1]
+            else:
+                pose_score = pose_score.softmax(-1)
 
         # B,N,P,D times D,2 -> B,N,P,2.  The final dimension is interleaved
         # as prototype0(cos,sin), prototype1(cos,sin), ...

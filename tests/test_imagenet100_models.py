@@ -209,3 +209,39 @@ def test_rotating_harmonic_model_keeps_hex_token_and_pe_shapes():
     assert model.patch_embed.num_patches == 195
     assert model.patch_embed.bases * 2 == 192
     assert model.pos_embed.shape == (1, 196, 192)
+
+
+def test_rotating_harmonic_softmax_adds_only_per_prototype_null_score():
+    embed = HexRotatingHarmonicPatchEmbed(
+        img_size=32,
+        in_chans=3,
+        embed_dim=12,
+        lattice_stride=8,
+        kernel_sizes=(12, 6),
+        bases=6,
+        directions=4,
+        global_directions=8,
+        radial_bins=4,
+        prototype_chunk_size=2,
+        pose_softmax=True,
+        use_null=True,
+        null_initial_score=0.0,
+    )
+    output = embed(torch.randn(2, 3, 32, 32, requires_grad=True))
+    assert output.shape == (2, embed.num_patches, 12)
+    assert embed.null_score.shape == (6,)
+    assert torch.all(embed.null_score == 0)
+    assert not hasattr(embed, "direction_pair")
+    assert not hasattr(embed, "scale_value")
+    output.square().mean().backward()
+    assert torch.isfinite(embed.prototype.grad).all()
+    assert torch.isfinite(embed.null_score.grad).all()
+
+
+def test_rotating_harmonic_softmax_model_keeps_hex_token_and_pe_shapes():
+    model = _build("rot_hex_harmonic_softmax_pe")
+    assert isinstance(model.patch_embed, HexRotatingHarmonicPatchEmbed)
+    assert model.patch_embed.pose_softmax
+    assert model.patch_embed.use_null
+    assert model.patch_embed.num_patches == 195
+    assert model.pos_embed.shape == (1, 196, 192)
