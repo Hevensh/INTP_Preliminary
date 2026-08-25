@@ -30,6 +30,7 @@ class HexRotatingGroupedDotPatchEmbed(nn.Module):
         prototype_std: float = 0.02,
         use_null: bool = True,
         null_initial_score: float = 0.0,
+        compensate_small_scales: bool = False,
     ) -> None:
         super().__init__()
         if not kernel_sizes:
@@ -49,6 +50,7 @@ class HexRotatingGroupedDotPatchEmbed(nn.Module):
         self.group_dim = embed_dim // groups
         self.prototype_chunk_size = int(prototype_chunk_size)
         self.use_null = bool(use_null)
+        self.compensate_small_scales = bool(compensate_small_scales)
 
         self.geometries = nn.ModuleList(
             HexPatchGeometry(img_size, in_chans, int(kernel), lattice_stride)
@@ -100,12 +102,18 @@ class HexRotatingGroupedDotPatchEmbed(nn.Module):
         nn.init.trunc_normal_(self.scale_value, std=0.02)
 
         scale_covers = []
+        reference_cover_mass = self.renderers[0].support_cover.sum()
         for renderer in self.renderers:
-            cover = renderer.support_cover / renderer.support_cover.sum()
+            raw_cover = renderer.support_cover
+            if self.compensate_small_scales:
+                cover = raw_cover * (reference_cover_mass / raw_cover.sum())
+            else:
+                cover = raw_cover / raw_cover.sum()
             scale_covers.append(cover)
         for index, cover in enumerate(scale_covers):
-            # This only removes the sample-count difference between K24 and K12.
-            # The dot-score distribution itself is intentionally left unnormalised.
+            # The legacy path uses unit-mass covers.  The compensated ablation
+            # preserves K24's convolution-like accumulation and lifts smaller
+            # scales to the same cover mass.
             self.register_buffer(f"scale_cover_{index}", cover, persistent=False)
 
         theta = torch.arange(directions) * direction_step

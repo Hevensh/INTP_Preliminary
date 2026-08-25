@@ -15,6 +15,7 @@ MODEL_VARIANTS = {
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
     "rot_hex_harmonic_softmax_pe",
+    "rot_hex_dot_grouped_compensated_pe",
 }
 
 
@@ -98,7 +99,7 @@ def build_imagenet100_model(
             use_null=rot_use_null,
             null_initial_score=rot_null_initial_score,
         )
-    elif variant == "rot_hex_dot_grouped_pe":
+    elif variant in {"rot_hex_dot_grouped_pe", "rot_hex_dot_grouped_compensated_pe"}:
         patch_embed = HexRotatingGroupedDotPatchEmbed(
             img_size=image_size,
             in_chans=3,
@@ -111,6 +112,7 @@ def build_imagenet100_model(
             prototype_chunk_size=rot_prototype_chunk_size,
             use_null=rot_use_null,
             null_initial_score=rot_null_initial_score,
+            compensate_small_scales=variant == "rot_hex_dot_grouped_compensated_pe",
         )
     else:
         patch_embed = HexRotatingHarmonicPatchEmbed(

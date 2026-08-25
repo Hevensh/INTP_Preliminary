@@ -245,3 +245,16 @@ def test_rotating_harmonic_softmax_model_keeps_hex_token_and_pe_shapes():
     assert model.patch_embed.use_null
     assert model.patch_embed.num_patches == 195
     assert model.pos_embed.shape == (1, 196, 192)
+
+
+def test_grouped_compensated_model_keeps_large_cover_mass_for_both_scales():
+    model = _build("rot_hex_dot_grouped_compensated_pe")
+    embed = model.patch_embed
+    assert isinstance(embed, HexRotatingGroupedDotPatchEmbed)
+    assert embed.compensate_small_scales
+    assert torch.allclose(embed.scale_cover_0.sum(), embed.scale_cover_1.sum())
+    assert embed.scale_cover_0.sum() > 100
+    assert embed.group_dim == 64
+    assert embed.bases_per_group == 32
+    assert embed.null_score.shape == (96,)
+    assert model.pos_embed.shape == (1, 196, 192)
