@@ -5,6 +5,7 @@ from experiments.imagenet100.models import build_imagenet100_model
 from layers.hex_linear_patch_embed import HexLinearPatchEmbed
 from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
+from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 
 
 def _build(variant: str):
@@ -141,4 +142,36 @@ def test_simple_rotating_dot_model_keeps_hex_token_and_pe_shapes():
     model = _build("rot_hex_dot_simple_pe")
     assert isinstance(model.patch_embed, HexRotatingDotPatchEmbed)
     assert model.patch_embed.num_patches == 195
+    assert model.pos_embed.shape == (1, 196, 192)
+
+
+def test_grouped_rotating_dot_embed_forward_backward_and_parameter_shapes():
+    embed = HexRotatingGroupedDotPatchEmbed(
+        img_size=32,
+        in_chans=3,
+        embed_dim=12,
+        lattice_stride=8,
+        kernel_sizes=(12, 6),
+        bases=6,
+        directions=4,
+        global_directions=8,
+        groups=3,
+        radial_bins=4,
+        prototype_chunk_size=2,
+    )
+    output = embed(torch.randn(2, 3, 32, 32, requires_grad=True))
+    assert output.shape == (2, embed.num_patches, 12)
+    assert embed.direction_pair.shape == (6, 2, 4)
+    assert embed.scale_value.shape == (6, 2, 4)
+    assert torch.all(embed.null_score == 0)
+    output.square().mean().backward()
+    assert torch.isfinite(embed.prototype.grad).all()
+    assert torch.isfinite(embed.direction_pair.grad).all()
+
+
+def test_grouped_rotating_dot_model_keeps_hex_token_and_pe_shapes():
+    model = _build("rot_hex_dot_grouped_pe")
+    assert isinstance(model.patch_embed, HexRotatingGroupedDotPatchEmbed)
+    assert model.patch_embed.num_patches == 195
+    assert model.patch_embed.group_dim == 64
     assert model.pos_embed.shape == (1, 196, 192)

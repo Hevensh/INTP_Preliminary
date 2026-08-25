@@ -6,9 +6,13 @@ import timm
 from layers.hex_linear_patch_embed import HexLinearPatchEmbed
 from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
+from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 
 
-MODEL_VARIANTS = {"deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe"}
+MODEL_VARIANTS = {
+    "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
+    "rot_hex_dot_grouped_pe",
+}
 
 
 def build_imagenet100_model(
@@ -77,8 +81,22 @@ def build_imagenet100_model(
             response_gate_location=rot_response_gate_location,
             score_clamp=rot_score_clamp,
         )
-    else:
+    elif variant == "rot_hex_dot_simple_pe":
         patch_embed = HexRotatingDotPatchEmbed(
+            img_size=image_size,
+            in_chans=3,
+            embed_dim=embed_dim,
+            lattice_stride=hex_stride,
+            kernel_sizes=rot_kernel_sizes,
+            bases=rot_bases,
+            directions=rot_directions,
+            global_directions=rot_global_directions,
+            prototype_chunk_size=rot_prototype_chunk_size,
+            use_null=rot_use_null,
+            null_initial_score=rot_null_initial_score,
+        )
+    else:
+        patch_embed = HexRotatingGroupedDotPatchEmbed(
             img_size=image_size,
             in_chans=3,
             embed_dim=embed_dim,
