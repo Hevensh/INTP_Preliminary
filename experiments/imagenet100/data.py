@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import InterpolationMode
@@ -208,6 +208,8 @@ def build_imagefolder_loaders(
     pin_memory: bool,
     train_samples: int | None = None,
     val_samples: int | None = None,
+    distributed_rank: int = 0,
+    distributed_world_size: int = 1,
 ) -> tuple[DataLoader, DataLoader, int, int]:
     train_transform, val_transform = imagenet100_transforms(image_size)
     train_dataset = MultiRootImageFolder(
@@ -221,6 +223,26 @@ def build_imagefolder_loaders(
     full_train_size, full_val_size = len(train_dataset), len(val_dataset)
     train_dataset = _subset(train_dataset, train_samples)
     val_dataset = _subset(val_dataset, val_samples)
+    if distributed_world_size <= 0:
+        raise ValueError("distributed_world_size must be positive")
+    if not 0 <= distributed_rank < distributed_world_size:
+        raise ValueError("distributed_rank must be in [0, distributed_world_size)")
+    train_sampler = val_sampler = None
+    if distributed_world_size > 1:
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=distributed_world_size,
+            rank=distributed_rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=distributed_world_size,
+            rank=distributed_rank,
+            shuffle=False,
+            drop_last=False,
+        )
     common = {
         "batch_size": batch_size,
         "num_workers": num_workers,
@@ -228,8 +250,20 @@ def build_imagefolder_loaders(
         "persistent_workers": num_workers > 0,
     }
     return (
-        DataLoader(train_dataset, shuffle=True, drop_last=True, **common),
-        DataLoader(val_dataset, shuffle=False, drop_last=False, **common),
+        DataLoader(
+            train_dataset,
+            sampler=train_sampler,
+            shuffle=train_sampler is None,
+            drop_last=True,
+            **common,
+        ),
+        DataLoader(
+            val_dataset,
+            sampler=val_sampler,
+            shuffle=False,
+            drop_last=False,
+            **common,
+        ),
         full_train_size,
         full_val_size,
     )

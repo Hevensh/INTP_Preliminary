@@ -16,9 +16,13 @@ from typing import Any
 
 import timm
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data.distributed import DistributedSampler
 
 from experiments.imagenet100.data import build_imagefolder_loaders, discover_imagefolder_splits
+from experiments.imagenet100.models import MODEL_VARIANTS, build_imagenet100_model
 
 
 @dataclass
@@ -27,6 +31,7 @@ class TrainConfig:
     data_root: str = "/kaggle/input/imagenet100"
     output_root: str = "/kaggle/working/runs"
     model: str = "deit_tiny_patch16_224"
+    model_variant: str = "deit_tiny"
     num_classes: int = 100
     image_size: int = 224
     pretrained: bool = False
@@ -48,6 +53,24 @@ class TrainConfig:
     max_val_steps: int | None = None
     progress_interval_seconds: float = 60.0
     resume: str | None = None
+    hex_kernel_size: int = 21
+    hex_stride: int = 18
+
+
+@dataclass(frozen=True)
+class DistributedContext:
+    rank: int
+    local_rank: int
+    world_size: int
+    device: torch.device
+
+    @property
+    def enabled(self) -> bool:
+        return self.world_size > 1
+
+    @property
+    def is_main(self) -> bool:
+        return self.rank == 0
 
 
 @dataclass(frozen=True)
@@ -76,6 +99,33 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("num_workers must be non-negative")
     if not 0.0 <= config.label_smoothing < 1.0:
         raise ValueError("label_smoothing must be in [0, 1)")
+    if config.model_variant not in MODEL_VARIANTS:
+        raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
+    if min(config.hex_kernel_size, config.hex_stride) <= 0:
+        raise ValueError("hex_kernel_size and hex_stride must be positive")
+
+
+def _distributed_context(requested_device: str) -> DistributedContext:
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    if world_size > 1:
+        if requested_device not in {"auto", "cuda"}:
+            raise ValueError("distributed execution currently requires CUDA")
+        if not torch.cuda.is_available():
+            raise RuntimeError("torchrun requested distributed CUDA, but CUDA is unavailable")
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend="nccl", init_method="env://")
+        return DistributedContext(rank, local_rank, world_size, torch.device("cuda", local_rank))
+    if requested_device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(requested_device)
+    return DistributedContext(rank=0, local_rank=0, world_size=1, device=device)
+
+
+def _raw_model(model: nn.Module) -> nn.Module:
+    return model.module if isinstance(model, DistributedDataParallel) else model
 
 
 def _seed_everything(seed: int) -> None:
@@ -187,6 +237,7 @@ def _run_epoch(
     epoch: int,
     phase: str,
     progress_interval_seconds: float,
+    distributed: DistributedContext,
 ) -> EpochMetrics:
     training = optimizer is not None
     model.train(training)
@@ -222,7 +273,7 @@ def _run_epoch(
             top1_correct += correct1
             top5_correct += correct5
             now = time.perf_counter()
-            if progress_interval_seconds > 0 and now >= next_progress_at:
+            if distributed.is_main and progress_interval_seconds > 0 and now >= next_progress_at:
                 elapsed = now - started
                 completed_steps = step + 1
                 estimated_total = elapsed * total_steps / completed_steps
@@ -236,7 +287,7 @@ def _run_epoch(
                     "loss": total_loss / total_samples,
                     "top1": top1_correct / total_samples,
                     "learning_rate": optimizer.param_groups[0]["lr"] if optimizer is not None else None,
-                    "samples_per_second": total_samples / elapsed,
+                    "samples_per_second": total_samples / elapsed * distributed.world_size,
                     "elapsed_seconds": elapsed,
                     "eta_seconds": max(estimated_total - elapsed, 0.0),
                 }
@@ -250,6 +301,20 @@ def _run_epoch(
     if total_samples == 0:
         raise RuntimeError("epoch processed zero samples")
     seconds = time.perf_counter() - started
+    if distributed.enabled:
+        totals = torch.tensor(
+            [total_loss, total_samples, top1_correct, top5_correct],
+            dtype=torch.float64,
+            device=device,
+        )
+        dist.all_reduce(totals, op=dist.ReduceOp.SUM)
+        elapsed = torch.tensor(seconds, dtype=torch.float64, device=device)
+        dist.all_reduce(elapsed, op=dist.ReduceOp.MAX)
+        total_loss, total_samples, top1_correct, top5_correct = totals.tolist()
+        seconds = float(elapsed)
+        total_samples = int(total_samples)
+        top1_correct = int(top1_correct)
+        top5_correct = int(top5_correct)
     return EpochMetrics(
         loss=total_loss / total_samples,
         top1=top1_correct / total_samples,
@@ -273,7 +338,7 @@ def _checkpoint_payload(
     return {
         "epoch": epoch,
         "best_top1": best_top1,
-        "model": model.state_dict(),
+        "model": _raw_model(model).state_dict(),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
         "scaler": scaler.state_dict(),
@@ -281,7 +346,7 @@ def _checkpoint_payload(
         "rng": {
             "python": random.getstate(),
             "torch": torch.get_rng_state(),
-            "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
         },
     }
 
@@ -301,7 +366,7 @@ def _restore_checkpoint(
     scaler: torch.amp.GradScaler,
 ) -> tuple[int, float]:
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    model.load_state_dict(checkpoint["model"])
+    _raw_model(model).load_state_dict(checkpoint["model"])
     optimizer.load_state_dict(checkpoint["optimizer"])
     scheduler.load_state_dict(checkpoint["scheduler"])
     scaler.load_state_dict(checkpoint["scaler"])
@@ -311,7 +376,12 @@ def _restore_checkpoint(
     if "torch" in rng:
         torch.set_rng_state(rng["torch"])
     if torch.cuda.is_available() and rng.get("cuda") is not None:
-        torch.cuda.set_rng_state_all(rng["cuda"])
+        cuda_rng = rng["cuda"]
+        if isinstance(cuda_rng, (list, tuple)):
+            # Compatibility with checkpoints written before DDP stored only
+            # the current process' CUDA RNG state.
+            cuda_rng = cuda_rng[min(torch.cuda.current_device(), len(cuda_rng) - 1)]
+        torch.cuda.set_rng_state(cuda_rng)
     return int(checkpoint["epoch"]) + 1, float(checkpoint.get("best_top1", -1.0))
 
 
@@ -330,45 +400,47 @@ def main() -> None:
         if value is not None:
             setattr(config, name, value)
     _validate_config(config)
-    _seed_everything(config.seed)
-
-    if config.device == "auto":
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    else:
-        device = torch.device(config.device)
+    distributed = _distributed_context(config.device)
+    device = distributed.device
+    _seed_everything(config.seed + distributed.rank)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but is unavailable")
     _validate_cuda_architecture(device)
     amp = bool(config.amp and device.type == "cuda")
 
-    print(
-        json.dumps(
-            {
-                "event": "start",
-                "experiment_name": config.experiment_name,
-                "device": str(device),
-                "data_root": config.data_root,
-                "epochs": config.epochs,
-                "batch_size": config.batch_size,
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
+    if distributed.is_main:
+        print(
+            json.dumps(
+                {
+                    "event": "start",
+                    "experiment_name": config.experiment_name,
+                    "device": str(device),
+                    "data_root": config.data_root,
+                    "epochs": config.epochs,
+                    "batch_size": config.batch_size,
+                    "per_device_batch_size": config.batch_size,
+                    "global_batch_size": config.batch_size * distributed.world_size,
+                    "world_size": distributed.world_size,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     splits = discover_imagefolder_splits(config.data_root, expected_classes=config.num_classes)
-    print(
-        json.dumps(
-            {
-                "event": "dataset_discovered",
-                "train_roots": [str(path) for path in splits.train],
-                "val_root": str(splits.val),
-                "classes": len(splits.classes),
-                "next": "indexing image paths; this can take several minutes on Kaggle storage",
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
+    if distributed.is_main:
+        print(
+            json.dumps(
+                {
+                    "event": "dataset_discovered",
+                    "train_roots": [str(path) for path in splits.train],
+                    "val_root": str(splits.val),
+                    "classes": len(splits.classes),
+                    "next": "indexing image paths; this can take several minutes on Kaggle storage",
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     train_loader, val_loader, full_train_size, full_val_size = build_imagefolder_loaders(
         splits,
         image_size=config.image_size,
@@ -377,25 +449,39 @@ def main() -> None:
         pin_memory=device.type == "cuda",
         train_samples=config.train_samples,
         val_samples=config.val_samples,
+        distributed_rank=distributed.rank,
+        distributed_world_size=distributed.world_size,
     )
-    print(
-        json.dumps(
-            {
-                "event": "dataset_indexed",
-                "train_images": full_train_size,
-                "val_images": full_val_size,
-                "next": "building model",
-            },
-            ensure_ascii=False,
-        ),
-        flush=True,
-    )
-    model = timm.create_model(
-        config.model,
+    if distributed.is_main:
+        print(
+            json.dumps(
+                {
+                    "event": "dataset_indexed",
+                    "train_images": full_train_size,
+                    "val_images": full_val_size,
+                    "next": "building model",
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    model = build_imagenet100_model(
+        variant=config.model_variant,
+        model_name=config.model,
         pretrained=config.pretrained,
         num_classes=config.num_classes,
-        img_size=config.image_size,
+        image_size=config.image_size,
+        hex_kernel_size=config.hex_kernel_size,
+        hex_stride=config.hex_stride,
     ).to(device)
+    if distributed.enabled:
+        model = DistributedDataParallel(
+            model,
+            device_ids=[distributed.local_rank],
+            output_device=distributed.local_rank,
+            broadcast_buffers=False,
+            gradient_as_bucket_view=True,
+        )
     criterion = nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -418,9 +504,13 @@ def main() -> None:
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
 
     run_dir = Path(config.output_root) / config.experiment_name
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if distributed.is_main:
+        run_dir.mkdir(parents=True, exist_ok=True)
+    if distributed.enabled:
+        dist.barrier()
     metrics_path = run_dir / "metrics.jsonl"
-    _atomic_json(run_dir / "config.json", asdict(config))
+    if distributed.is_main:
+        _atomic_json(run_dir / "config.json", asdict(config))
     environment = _environment(device)
     environment["dataset"] = {
         "requested_root": str(Path(config.data_root).resolve()),
@@ -432,18 +522,28 @@ def main() -> None:
         "effective_train_images": len(train_loader.dataset),
         "effective_val_images": len(val_loader.dataset),
     }
-    _atomic_json(run_dir / "environment.json", environment)
+    environment["distributed"] = {
+        "world_size": distributed.world_size,
+        "backend": dist.get_backend() if distributed.enabled else None,
+        "per_device_batch_size": config.batch_size,
+        "global_batch_size": config.batch_size * distributed.world_size,
+    }
+    if distributed.is_main:
+        _atomic_json(run_dir / "environment.json", environment)
+    raw_model = _raw_model(model)
     model_summary = {
         "name": config.model,
-        "parameters": sum(parameter.numel() for parameter in model.parameters()),
+        "variant": config.model_variant,
+        "parameters": sum(parameter.numel() for parameter in raw_model.parameters()),
         "trainable_parameters": sum(
-            parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+            parameter.numel() for parameter in raw_model.parameters() if parameter.requires_grad
         ),
         "image_size": config.image_size,
         "num_classes": config.num_classes,
     }
-    _atomic_json(run_dir / "model_summary.json", model_summary)
-    print(json.dumps({"event": "setup", **environment["dataset"], **model_summary}, ensure_ascii=False))
+    if distributed.is_main:
+        _atomic_json(run_dir / "model_summary.json", model_summary)
+        print(json.dumps({"event": "setup", **environment["dataset"], **environment["distributed"], **model_summary}, ensure_ascii=False))
 
     start_epoch, best_top1 = 1, -1.0
     if config.resume is not None:
@@ -459,14 +559,29 @@ def main() -> None:
         torch.cuda.reset_peak_memory_stats(device)
 
     history: list[dict[str, Any]] = []
+    if distributed.is_main and metrics_path.exists():
+        for line in metrics_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if int(record.get("epoch", 0)) < start_epoch:
+                history.append(record)
     training_started = time.perf_counter()
     for epoch in range(start_epoch, config.epochs + 1):
-        print(
-            json.dumps(
-                {"event": "epoch_start", "phase": "train", "epoch": epoch, "epochs": config.epochs}
-            ),
-            flush=True,
-        )
+        if isinstance(train_loader.sampler, DistributedSampler):
+            train_loader.sampler.set_epoch(epoch)
+        if distributed.is_main:
+            print(
+                json.dumps(
+                    {
+                        "event": "epoch_start",
+                        "phase": "train",
+                        "epoch": epoch,
+                        "epochs": config.epochs,
+                    }
+                ),
+                flush=True,
+            )
         train_metrics = _run_epoch(
             model=model,
             loader=train_loader,
@@ -481,13 +596,20 @@ def main() -> None:
             epoch=epoch,
             phase="train",
             progress_interval_seconds=config.progress_interval_seconds,
+            distributed=distributed,
         )
-        print(
-            json.dumps(
-                {"event": "epoch_start", "phase": "val", "epoch": epoch, "epochs": config.epochs}
-            ),
-            flush=True,
-        )
+        if distributed.is_main:
+            print(
+                json.dumps(
+                    {
+                        "event": "epoch_start",
+                        "phase": "val",
+                        "epoch": epoch,
+                        "epochs": config.epochs,
+                    }
+                ),
+                flush=True,
+            )
         val_metrics = _run_epoch(
             model=model,
             loader=val_loader,
@@ -502,6 +624,7 @@ def main() -> None:
             epoch=epoch,
             phase="val",
             progress_interval_seconds=config.progress_interval_seconds,
+            distributed=distributed,
         )
         record = {
             "epoch": epoch,
@@ -509,23 +632,27 @@ def main() -> None:
             "train": asdict(train_metrics),
             "val": asdict(val_metrics),
         }
-        history.append(record)
-        _append_jsonl(metrics_path, record)
+        if distributed.is_main:
+            history.append(record)
+            _append_jsonl(metrics_path, record)
         improved = val_metrics.top1 > best_top1
         best_top1 = max(best_top1, val_metrics.top1)
-        payload = _checkpoint_payload(
-            epoch=epoch,
-            best_top1=best_top1,
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            scaler=scaler,
-            config=config,
-        )
-        _save_checkpoint(run_dir / "last.pt", payload)
-        if improved:
-            _save_checkpoint(run_dir / "best.pt", payload)
-        print(json.dumps(record, ensure_ascii=False))
+        if distributed.is_main:
+            payload = _checkpoint_payload(
+                epoch=epoch,
+                best_top1=best_top1,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                config=config,
+            )
+            _save_checkpoint(run_dir / "last.pt", payload)
+            if improved:
+                _save_checkpoint(run_dir / "best.pt", payload)
+            print(json.dumps(record, ensure_ascii=False))
+        if distributed.enabled:
+            dist.barrier()
 
     summary: dict[str, Any] = {
         "status": "complete",
@@ -543,8 +670,12 @@ def main() -> None:
                 "peak_cuda_reserved_mib": torch.cuda.max_memory_reserved(device) / 1024**2,
             }
         )
-    _atomic_json(run_dir / "summary.json", summary)
-    print(json.dumps({"event": "complete", **summary}, ensure_ascii=False))
+    if distributed.is_main:
+        _atomic_json(run_dir / "summary.json", summary)
+        print(json.dumps({"event": "complete", **summary}, ensure_ascii=False))
+    if distributed.enabled:
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

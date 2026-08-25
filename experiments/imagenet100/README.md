@@ -57,3 +57,32 @@ Startup records are printed immediately before dataset discovery, image-path
 indexing, model construction, and each train/validation phase. Indexing the
 135,000 Kaggle-mounted files may take several minutes, but it is no longer a
 silent step.
+## Two-T4 DeiT versus Hex patch comparison
+
+The 20-epoch comparison uses the same DeiT-Tiny backbone, augmentation,
+optimizer, schedule, per-device batch size, and global batch size. The Hex
+variant only replaces the ordinary 16x16/stride-16 Conv2d patch embedding with
+a 21x21 circular Hex sampler on a stride-18 lattice (195 rather than 196 image
+tokens).
+
+From the repository root in a Kaggle notebook with two T4 GPUs:
+
+```bash
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+bash scripts/kaggle/run_imagenet100_deit_vs_hex_2xt4_e20.sh
+```
+
+The default is batch 256 per GPU, hence global batch 512. To lower memory:
+
+```bash
+BATCH_SIZE=192 DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+bash scripts/kaggle/run_imagenet100_deit_vs_hex_2xt4_e20.sh
+```
+
+Set `RUN_BASELINE=0` or `RUN_HEX=0` to run only one arm. An interrupted arm
+automatically resumes from its `last.pt`; a completed arm is skipped. Use a new
+`OUTPUT_ROOT` for an intentional fresh rerun.
+
+Each run stores its resolved config, environment, model summary, per-epoch
+metrics, best checkpoint, last checkpoint, and final summary below
+`/kaggle/working/runs` by default.
