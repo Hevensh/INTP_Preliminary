@@ -36,6 +36,8 @@ class SquarePatchDenseGridLook(nn.Module):
         look_direction_bins: int = 8,
         look_radial_bins: int = 4,
         look_radius: float = 4.0,
+        patch_centers_xy: torch.Tensor | None = None,
+        patch_coordinates_xy: torch.Tensor | None = None,
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
@@ -46,8 +48,10 @@ class SquarePatchDenseGridLook(nn.Module):
             look_direction_bins, look_radial_bins,
         ) <= 0:
             raise ValueError("dimensions and sample counts must be positive")
-        if image_size % patch_size:
-            raise ValueError("image_size must be divisible by patch_size")
+        if (patch_centers_xy is None) != (patch_coordinates_xy is None):
+            raise ValueError(
+                "patch_centers_xy and patch_coordinates_xy must be supplied together"
+            )
         if source_directions > source_direction_period:
             raise ValueError("source_directions cannot exceed its direction period")
         if prototype_angular_bins % source_direction_period:
@@ -59,7 +63,17 @@ class SquarePatchDenseGridLook(nn.Module):
         if min(prototype_radius, look_radius) <= 0:
             raise ValueError("prototype_radius and look_radius must be positive")
 
-        pixel_xy, grid_xy = build_square_patch_centers(image_size, patch_size)
+        if patch_centers_xy is None:
+            if image_size % patch_size:
+                raise ValueError("image_size must be divisible by patch_size")
+            pixel_xy, grid_xy = build_square_patch_centers(image_size, patch_size)
+        else:
+            pixel_xy = torch.as_tensor(patch_centers_xy, dtype=torch.float32)
+            grid_xy = torch.as_tensor(patch_coordinates_xy, dtype=torch.float32)
+            if pixel_xy.ndim != 2 or pixel_xy.shape[-1] != 2:
+                raise ValueError("patch_centers_xy must have shape (N, 2)")
+            if grid_xy.shape != pixel_xy.shape:
+                raise ValueError("patch_coordinates_xy must match patch_centers_xy")
         self.register_buffer("patch_centers_xy", pixel_xy, persistent=True)
         self.register_buffer("patch_coordinates_xy", grid_xy, persistent=True)
         self.image_size = int(image_size)

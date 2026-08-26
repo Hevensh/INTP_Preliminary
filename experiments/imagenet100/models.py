@@ -8,6 +8,7 @@ from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
 from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
+from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
 
 
 MODEL_VARIANTS = {
@@ -17,6 +18,7 @@ MODEL_VARIANTS = {
     "rot_hex_harmonic_softmax_pe",
     "rot_hex_harmonic_l1_softmax_pe",
     "rot_hex_dot_grouped_compensated_pe",
+    "rot_hex_harmonic_look", "rot_hex_harmonic_pe_look",
 }
 
 
@@ -50,6 +52,19 @@ def build_imagenet100_model(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
             "set pretrained=false"
         )
+    if variant in {"rot_hex_harmonic_look", "rot_hex_harmonic_pe_look"}:
+        return DeiTTinyRotHexLook(
+            num_classes=num_classes,
+            image_size=image_size,
+            use_pos_embed=variant == "rot_hex_harmonic_pe_look",
+            lattice_stride=hex_stride,
+            kernel_sizes=rot_kernel_sizes,
+            bases=rot_bases,
+            directions=rot_directions,
+            global_directions=rot_global_directions,
+            prototype_chunk_size=rot_prototype_chunk_size,
+        )
+
     model = timm.create_model(
         model_name,
         pretrained=pretrained,
