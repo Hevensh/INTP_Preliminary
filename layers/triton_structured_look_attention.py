@@ -1,9 +1,8 @@
 """Flash-style attention with an implicit pose-conditioned Look bias.
 
 The forward kernel never materialises ``B x H x N x N`` attention logits or
-Look bias.  The current backward deliberately recomputes the small reference
-formula one layer at a time; this keeps activation memory bounded while giving
-us an exact gradient oracle before replacing the backward with Triton.
+Look bias.  Backward recomputes probabilities and score gradients in a Triton
+kernel, then uses GEMMs for Q/K/V and compact reductions for pose/grid grads.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ def reference_structured_look_attention(
 
 @triton.jit
 def _structured_look_forward(
-    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr, output_ptr,
+    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr, output_ptr, lse_ptr,
     stride_qb, stride_qh, stride_qn, stride_qd,
     stride_kb, stride_kh, stride_kn, stride_kd,
     stride_vb, stride_vh, stride_vn, stride_vd,
@@ -143,6 +142,123 @@ def _structured_look_forward(
         accumulator,
         mask=query_mask[:, None] & feature_mask[None, :],
     )
+    tl.store(
+        lse_ptr + batch_head * sequence + query,
+        row_max + tl.log(row_sum),
+        mask=query_mask,
+    )
+
+
+@triton.jit
+def _structured_look_probability_score_grad(
+    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr,
+    grad_output_ptr, output_ptr, lse_ptr,
+    probability_ptr, score_grad_ptr,
+    stride_qb, stride_qh, stride_qn, stride_qd,
+    stride_kb, stride_kh, stride_kn, stride_kd,
+    stride_vb, stride_vh, stride_vn, stride_vd,
+    stride_pb, stride_pq, stride_ph, stride_pp,
+    stride_fh, stride_fp, stride_fq, stride_fk,
+    stride_gob, stride_goh, stride_gon, stride_god,
+    stride_ob, stride_oh, stride_on, stride_od,
+    stride_prob_b, stride_prob_h, stride_prob_q, stride_prob_k,
+    heads: tl.constexpr,
+    sequence: tl.constexpr,
+    patch_count: tl.constexpr,
+    head_dim: tl.constexpr,
+    poses: tl.constexpr,
+    scale: tl.constexpr,
+    block_m: tl.constexpr,
+    block_n: tl.constexpr,
+    block_d: tl.constexpr,
+):
+    batch_head = tl.program_id(0)
+    block_q = tl.program_id(1)
+    batch = batch_head // heads
+    head = batch_head % heads
+    query = block_q * block_m + tl.arange(0, block_m)
+    feature = tl.arange(0, block_d)
+    query_mask = query < sequence
+    feature_mask = feature < head_dim
+
+    q = tl.load(
+        q_ptr + batch * stride_qb + head * stride_qh
+        + query[:, None] * stride_qn + feature[None, :] * stride_qd,
+        mask=query_mask[:, None] & feature_mask[None, :],
+        other=0.0,
+    )
+    lse = tl.load(
+        lse_ptr + batch_head * sequence + query,
+        mask=query_mask,
+        other=0.0,
+    )
+    grad_output = tl.load(
+        grad_output_ptr + batch * stride_gob + head * stride_goh
+        + query[:, None] * stride_gon + feature[None, :] * stride_god,
+        mask=query_mask[:, None] & feature_mask[None, :],
+        other=0.0,
+    )
+    output = tl.load(
+        output_ptr + batch * stride_ob + head * stride_oh
+        + query[:, None] * stride_on + feature[None, :] * stride_od,
+        mask=query_mask[:, None] & feature_mask[None, :],
+        other=0.0,
+    )
+    delta = tl.sum(grad_output.to(tl.float32) * output.to(tl.float32), axis=1)
+    patch_query = query - 1
+
+    for key_start in tl.static_range(0, sequence, block_n):
+        key = key_start + tl.arange(0, block_n)
+        key_mask = key < sequence
+        k = tl.load(
+            k_ptr + batch * stride_kb + head * stride_kh
+            + key[:, None] * stride_kn + feature[None, :] * stride_kd,
+            mask=key_mask[:, None] & feature_mask[None, :],
+            other=0.0,
+        )
+        score = tl.dot(q, tl.trans(k), input_precision="ieee") * scale
+        patch_key = key - 1
+        look_valid = (
+            query_mask[:, None] & key_mask[None, :]
+            & (query[:, None] > 0) & (key[None, :] > 0)
+        )
+        for pose_index in tl.static_range(0, poses):
+            pose_probability = tl.load(
+                pose_ptr + batch * stride_pb + patch_query * stride_pq
+                + head * stride_ph + pose_index * stride_pp,
+                mask=query_mask & (query > 0) & (patch_query < patch_count),
+                other=0.0,
+            ).to(tl.float32)
+            field = tl.load(
+                field_ptr + head * stride_fh + pose_index * stride_fp
+                + patch_query[:, None] * stride_fq
+                + patch_key[None, :] * stride_fk,
+                mask=look_valid,
+                other=0.0,
+            ).to(tl.float32)
+            score += pose_probability[:, None] * field
+
+        probability = tl.exp(score - lse[:, None])
+        probability = tl.where(
+            query_mask[:, None] & key_mask[None, :], probability, 0.0
+        )
+        value = tl.load(
+            v_ptr + batch * stride_vb + head * stride_vh
+            + key[:, None] * stride_vn + feature[None, :] * stride_vd,
+            mask=key_mask[:, None] & feature_mask[None, :],
+            other=0.0,
+        )
+        grad_probability = tl.dot(
+            grad_output, tl.trans(value), input_precision="ieee"
+        )
+        score_grad = probability * (grad_probability - delta[:, None])
+        matrix_offset = (
+            batch * stride_prob_b + head * stride_prob_h
+            + query[:, None] * stride_prob_q + key[None, :] * stride_prob_k
+        )
+        matrix_mask = query_mask[:, None] & key_mask[None, :]
+        tl.store(probability_ptr + matrix_offset, probability, mask=matrix_mask)
+        tl.store(score_grad_ptr + matrix_offset, score_grad, mask=matrix_mask)
 
 
 class _StructuredLookAttention(torch.autograd.Function):
@@ -166,9 +282,12 @@ class _StructuredLookAttention(torch.autograd.Function):
         if block_d > 128:
             raise ValueError("head_dim above 128 is not supported")
         output = torch.empty_like(q)
+        lse = torch.empty(
+            (batch, heads, sequence), device=q.device, dtype=torch.float32
+        )
         block_m, block_n = 16, 32
         _structured_look_forward[(batch * heads, triton.cdiv(sequence, block_m))](
-            q, k, v, pose, fields, output,
+            q, k, v, pose, fields, output, lse,
             *q.stride(), *k.stride(), *v.stride(), *pose.stride(), *fields.stride(),
             *output.stride(),
             heads=heads, sequence=sequence, patch_count=patch_count,
@@ -177,27 +296,57 @@ class _StructuredLookAttention(torch.autograd.Function):
             num_warps=4,
         )
         ctx.scale = float(scale)
-        ctx.save_for_backward(q, k, v, pose, fields)
+        ctx.save_for_backward(q, k, v, pose, fields, output, lse)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        saved = ctx.saved_tensors
+        q, k, v, pose, fields, output, lse = ctx.saved_tensors
         needs = ctx.needs_input_grad[:5]
-        with torch.enable_grad():
-            inputs = [tensor.detach().requires_grad_(need) for tensor, need in zip(saved, needs)]
-            output = reference_structured_look_attention(
-                *inputs, scale=ctx.scale
-            )
-            requested = [tensor for tensor, need in zip(inputs, needs) if need]
-            gradients = torch.autograd.grad(
-                output, requested, grad_output, allow_unused=False
-            )
-        result = []
-        iterator = iter(gradients)
-        for need in needs:
-            result.append(next(iterator) if need else None)
-        return (*result, None)
+        batch, heads, sequence, head_dim = q.shape
+        patch_count, poses = pose.shape[1], pose.shape[-1]
+        block_m, block_n = 16, 32
+        block_d = triton.next_power_of_2(head_dim)
+
+        # Storing these two transient matrices makes the expensive score/Look
+        # recomputation a single fused pass.  They live only during backward.
+        probability = torch.empty(
+            (batch, heads, sequence, sequence), device=q.device, dtype=q.dtype
+        )
+        score_grad = torch.empty_like(probability)
+        grid = (
+            batch * heads,
+            triton.cdiv(sequence, block_m),
+        )
+        _structured_look_probability_score_grad[grid](
+            q, k, v, pose, fields, grad_output, output, lse,
+            probability, score_grad,
+            *q.stride(), *k.stride(), *v.stride(), *pose.stride(), *fields.stride(),
+            *grad_output.stride(), *output.stride(), *probability.stride(),
+            heads=heads, sequence=sequence, patch_count=patch_count,
+            head_dim=head_dim, poses=poses, scale=ctx.scale,
+            block_m=block_m, block_n=block_n, block_d=block_d,
+            num_warps=4,
+        )
+
+        grad_q = grad_k = grad_v = grad_pose = grad_fields = None
+        if needs[0]:
+            grad_q = (score_grad @ k) * ctx.scale
+        if needs[1]:
+            grad_k = (score_grad.transpose(-2, -1) @ q) * ctx.scale
+        if needs[2]:
+            grad_v = probability.transpose(-2, -1) @ grad_output
+
+        patch_score_grad = score_grad[:, :, 1:, 1:].float()
+        if needs[3]:
+            grad_pose = torch.einsum(
+                "bhqk,hpqk->bqhp", patch_score_grad, fields.float()
+            ).to(pose.dtype)
+        if needs[4]:
+            grad_fields = torch.einsum(
+                "bhqk,bqhp->hpqk", patch_score_grad, pose.float()
+            ).to(fields.dtype)
+        return grad_q, grad_k, grad_v, grad_pose, grad_fields, None
 
 
 def structured_look_attention(q, k, v, pose, fields, *, scale):

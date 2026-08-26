@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Sequence
 
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
+from torchvision.datasets.folder import default_loader
 from torchvision.transforms import InterpolationMode
 
 
@@ -30,20 +32,19 @@ class MultiRootImageFolder(Dataset):
         *,
         classes: tuple[str, ...],
         transform: transforms.Compose,
+        samples: Sequence[tuple[str, int]] | None = None,
     ) -> None:
         self.roots = roots
         self.classes = list(classes)
         self.class_to_idx = {name: index for index, name in enumerate(classes)}
         self.transform = transform
-        self.loader = ImageFolder(roots[0]).loader
-        samples: list[tuple[str, int]] = []
-        for root in roots:
-            local = ImageFolder(root)
-            for path, local_index in local.samples:
-                class_name = local.classes[local_index]
-                samples.append((path, self.class_to_idx[class_name]))
-        self.samples = samples
-        self.targets = [target for _, target in samples]
+        self.loader = default_loader
+        self.samples = (
+            _index_roots(roots, classes)
+            if samples is None
+            else list(samples)
+        )
+        self.targets = [target for _, target in self.samples]
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -52,6 +53,30 @@ class MultiRootImageFolder(Dataset):
         path, target = self.samples[index]
         image = self.loader(path)
         return self.transform(image), target
+
+
+def _index_roots(
+    roots: tuple[Path, ...],
+    classes: tuple[str, ...],
+) -> list[tuple[str, int]]:
+    class_to_idx = {name: index for index, name in enumerate(classes)}
+    samples: list[tuple[str, int]] = []
+    for root in roots:
+        local = ImageFolder(root)
+        for path, local_index in local.samples:
+            class_name = local.classes[local_index]
+            samples.append((path, class_to_idx[class_name]))
+    return samples
+
+
+def index_imagefolder_samples(
+    splits: ImageFolderSplits,
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+    """Index train/validation paths once so DDP ranks can share the manifest."""
+    return (
+        _index_roots(splits.train, splits.classes),
+        _index_roots((splits.val,), splits.classes),
+    )
 
 
 def _directories_to_depth(root: Path, max_depth: int = 5) -> list[Path]:
@@ -210,14 +235,22 @@ def build_imagefolder_loaders(
     val_samples: int | None = None,
     distributed_rank: int = 0,
     distributed_world_size: int = 1,
+    train_index: Sequence[tuple[str, int]] | None = None,
+    val_index: Sequence[tuple[str, int]] | None = None,
 ) -> tuple[DataLoader, DataLoader, int, int]:
     train_transform, val_transform = imagenet100_transforms(image_size)
     train_dataset = MultiRootImageFolder(
         splits.train,
         classes=splits.classes,
         transform=train_transform,
+        samples=train_index,
     )
-    val_dataset = ImageFolder(splits.val, transform=val_transform)
+    val_dataset = MultiRootImageFolder(
+        (splits.val,),
+        classes=splits.classes,
+        transform=val_transform,
+        samples=val_index,
+    )
     if tuple(train_dataset.classes) != splits.classes or tuple(val_dataset.classes) != splits.classes:
         raise RuntimeError("class ordering changed while constructing ImageFolder datasets")
     full_train_size, full_val_size = len(train_dataset), len(val_dataset)

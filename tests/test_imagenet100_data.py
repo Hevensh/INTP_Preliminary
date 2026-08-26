@@ -5,6 +5,7 @@ from PIL import Image
 from experiments.imagenet100.data import (
     build_imagefolder_loaders,
     discover_imagefolder_splits,
+    index_imagefolder_samples,
 )
 
 
@@ -58,6 +59,7 @@ def test_distributed_loaders_partition_training_indices(tmp_path: Path) -> None:
             for index in range(4):
                 _write_image(tmp_path / split / class_name / f"{index}.jpg")
     splits = discover_imagefolder_splits(tmp_path, expected_classes=2)
+    train_index, val_index = index_imagefolder_samples(splits)
     loaders = []
     for rank in range(2):
         train, val, _, _ = build_imagefolder_loaders(
@@ -68,6 +70,8 @@ def test_distributed_loaders_partition_training_indices(tmp_path: Path) -> None:
             pin_memory=False,
             distributed_rank=rank,
             distributed_world_size=2,
+            train_index=train_index,
+            val_index=val_index,
         )
         loaders.append((train, val))
 

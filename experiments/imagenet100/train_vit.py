@@ -21,7 +21,11 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 
-from experiments.imagenet100.data import build_imagefolder_loaders, discover_imagefolder_splits
+from experiments.imagenet100.data import (
+    build_imagefolder_loaders,
+    discover_imagefolder_splits,
+    index_imagefolder_samples,
+)
 from experiments.imagenet100.models import MODEL_VARIANTS, build_imagenet100_model
 
 
@@ -462,10 +466,29 @@ def main() -> None:
             f" (global {config.batch_size * distributed.world_size})",
             flush=True,
         )
-    splits = discover_imagefolder_splits(config.data_root, expected_classes=config.num_classes)
+    indexed_payload: list[Any] = [None]
+    index_started = time.perf_counter()
     if distributed.is_main:
+        splits = discover_imagefolder_splits(
+            config.data_root, expected_classes=config.num_classes
+        )
         print(
             f"[data] found {len(splits.classes)} classes; indexing image paths...",
+            flush=True,
+        )
+        train_index, val_index = index_imagefolder_samples(splits)
+        indexed_payload[0] = (splits, train_index, val_index)
+    if distributed.enabled:
+        # ImageFolder otherwise walks all 135k files independently on every
+        # rank. Broadcast one compact manifest instead of doubling Kaggle I/O.
+        dist.broadcast_object_list(
+            indexed_payload, src=0, device=distributed.device
+        )
+    splits, train_index, val_index = indexed_payload[0]
+    if distributed.is_main:
+        print(
+            f"[data] indexed and shared paths in "
+            f"{time.perf_counter() - index_started:.1f}s",
             flush=True,
         )
     train_loader, val_loader, full_train_size, full_val_size = build_imagefolder_loaders(
@@ -478,6 +501,8 @@ def main() -> None:
         val_samples=config.val_samples,
         distributed_rank=distributed.rank,
         distributed_world_size=distributed.world_size,
+        train_index=train_index,
+        val_index=val_index,
     )
     if distributed.is_main:
         print(

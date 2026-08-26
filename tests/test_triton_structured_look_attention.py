@@ -49,3 +49,21 @@ def test_triton_matches_reference_forward_and_all_gradients():
         torch.testing.assert_close(
             actual_input.grad, expected_input.grad, atol=3e-5, rtol=3e-5
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_triton_half_precision_matches_reference_and_all_gradients():
+    actual_inputs = tuple(t.half() for t in _inputs("cuda"))
+    actual_inputs = tuple(t.detach().requires_grad_(True) for t in actual_inputs)
+    expected_inputs = tuple(x.detach().clone().requires_grad_(True) for x in actual_inputs)
+    scale = 1 / 16**0.5
+    actual = structured_look_attention(*actual_inputs, scale=scale)
+    expected = reference_structured_look_attention(*expected_inputs, scale=scale)
+    torch.testing.assert_close(actual, expected, atol=2e-3, rtol=2e-3)
+    gradient = torch.randn_like(actual)
+    actual.backward(gradient)
+    expected.backward(gradient)
+    for actual_input, expected_input in zip(actual_inputs, expected_inputs):
+        torch.testing.assert_close(
+            actual_input.grad, expected_input.grad, atol=4e-3, rtol=4e-3
+        )
