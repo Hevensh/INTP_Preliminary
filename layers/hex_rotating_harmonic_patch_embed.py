@@ -30,6 +30,7 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         pose_softmax: bool = False,
         use_null: bool = False,
         null_initial_score: float = 0.0,
+        match_metric: str = "dot",
     ) -> None:
         super().__init__()
         if not kernel_sizes:
@@ -47,6 +48,9 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         self.prototype_chunk_size = int(prototype_chunk_size)
         self.pose_softmax = bool(pose_softmax)
         self.use_null = bool(use_null)
+        if match_metric not in {"dot", "relative_l1"}:
+            raise ValueError("match_metric must be dot or relative_l1")
+        self.match_metric = match_metric
         if self.use_null and not self.pose_softmax:
             raise ValueError("use_null requires pose_softmax")
 
@@ -131,11 +135,30 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         for scale_index, (patch, renderer) in enumerate(zip(patches, self.renderers)):
             cover = getattr(self, f"scale_cover_{scale_index}")
             rendered = renderer(prototype)
-            score = torch.einsum(
-                "qncm,pdcm->qnpd",
-                patch * cover[None, None, None],
-                rendered,
-            )
+            weighted_patch = patch * cover[None, None, None]
+            if self.match_metric == "dot":
+                score = torch.einsum(
+                    "qncm,pdcm->qnpd", weighted_patch, rendered
+                )
+            else:
+                # Compare each prototype against the zero-prototype baseline:
+                #   score = ||x||_1,c - ||x - w||_1,c
+                # Multiplying x and w by the non-negative cover makes ordinary
+                # L1 distance exactly equal to the required weighted L1. cdist
+                # avoids materialising a B*N*P*D*C*M difference tensor.
+                patch_flat = weighted_patch.flatten(2)
+                rendered_flat = (
+                    rendered * cover[None, None, None]
+                ).flatten(2)
+                distance = torch.cdist(
+                    patch_flat,
+                    rendered_flat.reshape(-1, rendered_flat.shape[-1]),
+                    p=1,
+                ).view(
+                    patch.shape[0], patch.shape[1], stop - start, self.directions
+                )
+                zero_distance = patch_flat.abs().sum(-1)
+                score = zero_distance[:, :, None, None] - distance
             pose_score = score if pose_score is None else pose_score + score
 
         if self.pose_softmax:

@@ -15,6 +15,7 @@ MODEL_VARIANTS = {
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
     "rot_hex_harmonic_softmax_pe",
+    "rot_hex_harmonic_l1_softmax_pe",
     "rot_hex_dot_grouped_compensated_pe",
 }
 
@@ -115,6 +116,10 @@ def build_imagenet100_model(
             compensate_small_scales=variant == "rot_hex_dot_grouped_compensated_pe",
         )
     else:
+        harmonic_softmax = variant in {
+            "rot_hex_harmonic_softmax_pe",
+            "rot_hex_harmonic_l1_softmax_pe",
+        }
         patch_embed = HexRotatingHarmonicPatchEmbed(
             img_size=image_size,
             in_chans=3,
@@ -125,9 +130,14 @@ def build_imagenet100_model(
             directions=rot_directions,
             global_directions=rot_global_directions,
             prototype_chunk_size=rot_prototype_chunk_size,
-            pose_softmax=variant == "rot_hex_harmonic_softmax_pe",
-            use_null=variant == "rot_hex_harmonic_softmax_pe",
+            pose_softmax=harmonic_softmax,
+            use_null=harmonic_softmax,
             null_initial_score=rot_null_initial_score,
+            match_metric=(
+                "relative_l1"
+                if variant == "rot_hex_harmonic_l1_softmax_pe"
+                else "dot"
+            ),
         )
     model.patch_embed = patch_embed
     model.pos_embed = nn.Parameter(

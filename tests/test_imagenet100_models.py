@@ -247,6 +247,74 @@ def test_rotating_harmonic_softmax_model_keeps_hex_token_and_pe_shapes():
     assert model.pos_embed.shape == (1, 196, 192)
 
 
+def test_relative_l1_harmonic_uses_zero_baseline_and_negative_null():
+    embed = HexRotatingHarmonicPatchEmbed(
+        img_size=32,
+        in_chans=3,
+        embed_dim=12,
+        lattice_stride=8,
+        kernel_sizes=(12, 6),
+        bases=6,
+        directions=4,
+        global_directions=8,
+        radial_bins=4,
+        prototype_chunk_size=2,
+        pose_softmax=True,
+        use_null=True,
+        null_initial_score=-0.1,
+        match_metric="relative_l1",
+    )
+    image = torch.randn(2, 3, 32, 32, requires_grad=True)
+    output = embed(image)
+    assert output.shape == (2, embed.num_patches, 12)
+    assert embed.match_metric == "relative_l1"
+    assert torch.allclose(embed.null_score, torch.full((6,), -0.1))
+    assert torch.isfinite(output).all()
+    output.square().mean().backward()
+    assert torch.isfinite(embed.prototype.grad).all()
+    assert torch.isfinite(embed.null_score.grad).all()
+
+
+def test_relative_l1_harmonic_score_is_improvement_over_zero_prototype():
+    embed = HexRotatingHarmonicPatchEmbed(
+        img_size=24,
+        in_chans=3,
+        embed_dim=2,
+        lattice_stride=8,
+        kernel_sizes=(12,),
+        bases=1,
+        directions=1,
+        global_directions=8,
+        radial_bins=4,
+        prototype_chunk_size=1,
+        match_metric="relative_l1",
+    )
+    image = torch.randn(1, 3, 24, 24)
+    patch = embed.geometries[0](image.float())
+    rendered = embed.renderers[0](embed.prototype)
+    cover = embed.scale_cover_0
+    expected = (
+        patch.abs() * cover[None, None, None]
+    ).sum((2, 3)) - (
+        (patch[:, :, None, None] - rendered[None, None]).abs()
+        * cover[None, None, None, None, None]
+    ).sum((4, 5)).squeeze((2, 3))
+    actual = embed(image)[..., 0] - embed.output_bias[0]
+    # cdist(p=1) uses a different parallel reduction order than the explicit
+    # reference sum, so allow the expected float32 accumulation difference.
+    torch.testing.assert_close(actual, expected, atol=2e-4, rtol=2e-4)
+
+
+def test_relative_l1_harmonic_model_keeps_hex_token_and_pe_shapes():
+    model = _build("rot_hex_harmonic_l1_softmax_pe")
+    assert isinstance(model.patch_embed, HexRotatingHarmonicPatchEmbed)
+    assert model.patch_embed.match_metric == "relative_l1"
+    assert model.patch_embed.pose_softmax
+    assert model.patch_embed.use_null
+    assert model.patch_embed.num_patches == 195
+    assert model.pos_embed.shape == (1, 196, 192)
+
+
 def test_grouped_compensated_model_keeps_large_cover_mass_for_both_scales():
     model = _build("rot_hex_dot_grouped_compensated_pe")
     embed = model.patch_embed
