@@ -287,6 +287,32 @@ def test_half_six_look_model_uses_matching_twelve_pose_period():
     assert model.look_bank.ring_sampler.rotation_samples == 12
 
 
+def test_half_six_compact_r3_look_shares_tokenizer_variable_ring_storage():
+    model = _build(
+        "rot_hex_harmonic_pe_look",
+        rot_directions=6,
+        rot_global_directions=12,
+        rot_angular_bins_per_radius=3,
+        look_compact_variable_rings=True,
+        rot_null_initial_score=0.0,
+    )
+    expected_counts = torch.arange(3, 37, 3)
+
+    assert model.patch_embed.directions == 6
+    assert model.look_bank.source_directions == 6
+    assert model.look_bank.source_direction_period == 12
+    assert model.look_bank.compact_variable_rings
+    torch.testing.assert_close(model.patch_embed.ring_counts, expected_counts)
+    torch.testing.assert_close(model.look_bank.ring_counts, expected_counts)
+    assert model.patch_embed.prototype.shape == (96, 3, 234)
+    assert model.look_bank.match_prototype.shape == (36, 3, 234)
+    for geometry in model.look_bank.compact_geometries:
+        torch.testing.assert_close(
+            geometry.patch_centers_xy,
+            model.patch_embed.patch_centers_xy,
+        )
+
+
 def test_relative_l1_harmonic_uses_zero_baseline_and_negative_null():
     embed = HexRotatingHarmonicPatchEmbed(
         img_size=32,

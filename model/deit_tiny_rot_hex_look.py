@@ -27,6 +27,8 @@ class DeiTTinyRotHexLook(nn.Module):
         bases: int = 96,
         directions: int = 4,
         global_directions: int = 8,
+        angular_bins_per_radius: int = 4,
+        look_compact_variable_rings: bool = False,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
     ) -> None:
@@ -44,6 +46,7 @@ class DeiTTinyRotHexLook(nn.Module):
             bases=bases,
             directions=directions,
             global_directions=global_directions,
+            angular_bins_per_radius=angular_bins_per_radius,
             prototype_chunk_size=prototype_chunk_size,
             pose_softmax=True,
             use_null=True,
@@ -85,7 +88,7 @@ class DeiTTinyRotHexLook(nn.Module):
             patch_size=16,
             in_channels=3,
             num_heads=self.depth * self.num_heads,
-            prototype_radial_bins=8,
+            prototype_radial_bins=(12 if look_compact_variable_rings else 8),
             # Preserve two stored polar samples per full-period pose.  The
             # default 4/8 half-circle search therefore remains 16 bins, while
             # a 6/12 search uses 24 bins without angular-grid mismatch.
@@ -99,6 +102,15 @@ class DeiTTinyRotHexLook(nn.Module):
             look_radius=4.0,
             patch_centers_xy=self.patch_embed.patch_centers_xy,
             patch_coordinates_xy=patch_coordinates,
+            compact_angular_bins_per_radius=(
+                angular_bins_per_radius if look_compact_variable_rings else None
+            ),
+            compact_kernel_sizes=(
+                kernel_sizes if look_compact_variable_rings else None
+            ),
+            compact_lattice_stride=(
+                lattice_stride if look_compact_variable_rings else None
+            ),
         )
 
     def forward_features(self, image: torch.Tensor) -> torch.Tensor:

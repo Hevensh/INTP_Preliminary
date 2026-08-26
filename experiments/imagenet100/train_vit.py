@@ -63,6 +63,8 @@ class TrainConfig:
     rot_bases: int = 96
     rot_directions: int = 4
     rot_global_directions: int = 8
+    rot_angular_bins_per_radius: int = 4
+    look_compact_variable_rings: bool = False
     rot_prototype_chunk_size: int = 16
     rot_use_null: bool = True
     rot_null_initial_score: float = -1.0
@@ -118,6 +120,8 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
     if min(config.hex_kernel_size, config.hex_stride) <= 0:
         raise ValueError("hex_kernel_size and hex_stride must be positive")
+    if config.rot_angular_bins_per_radius <= 0:
+        raise ValueError("rot_angular_bins_per_radius must be positive")
 
 
 def _distributed_context(requested_device: str) -> DistributedContext:
@@ -521,6 +525,8 @@ def main() -> None:
         rot_bases=config.rot_bases,
         rot_directions=config.rot_directions,
         rot_global_directions=config.rot_global_directions,
+        rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
+        look_compact_variable_rings=config.look_compact_variable_rings,
         rot_prototype_chunk_size=config.rot_prototype_chunk_size,
         rot_use_null=config.rot_use_null,
         rot_null_initial_score=config.rot_null_initial_score,

@@ -6,7 +6,10 @@ from collections.abc import Sequence
 import torch
 import torch.nn as nn
 
+from .hex_patch_geometry import HexPatchGeometry
+from .hex_rotating_polar_patch_embed import _PolarRenderer
 from .polar_ring_sampler import PolarRingSampler
+from .rotating_dot_product import rotating_dot_score, weighted_patch_flat
 from .square_patch_low_rank_look import build_square_patch_centers
 
 
@@ -38,6 +41,9 @@ class SquarePatchDenseGridLook(nn.Module):
         look_radius: float = 4.0,
         patch_centers_xy: torch.Tensor | None = None,
         patch_coordinates_xy: torch.Tensor | None = None,
+        compact_angular_bins_per_radius: int | None = None,
+        compact_kernel_sizes: Sequence[int] | None = None,
+        compact_lattice_stride: int | None = None,
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
@@ -87,23 +93,77 @@ class SquarePatchDenseGridLook(nn.Module):
         self.prototype_radius = float(prototype_radius)
         self.look_radius = float(look_radius)
         self.eps = float(eps)
+        self.compact_variable_rings = compact_angular_bins_per_radius is not None
+        self._num_scales = len(scales)
 
-        self.ring_sampler = PolarRingSampler(
-            radial_bins=prototype_radial_bins,
-            angular_bins=prototype_angular_bins,
-            rotation_samples=source_direction_period,
-            scales=scales,
-        )
-        self.match_prototype = nn.Parameter(torch.empty(
-            self.num_heads,
-            self.in_channels,
-            prototype_radial_bins,
-            prototype_angular_bins,
-        ))
-        nn.init.normal_(
-            self.match_prototype,
-            std=1.0 / math.sqrt(in_channels * prototype_radial_bins),
-        )
+        if self.compact_variable_rings:
+            angular_step = int(compact_angular_bins_per_radius)
+            if angular_step <= 0:
+                raise ValueError("compact_angular_bins_per_radius must be positive")
+            if compact_kernel_sizes is None or compact_lattice_stride is None:
+                raise ValueError(
+                    "compact variable rings require kernel sizes and lattice stride"
+                )
+            kernel_sizes = tuple(int(size) for size in compact_kernel_sizes)
+            if len(kernel_sizes) != self._num_scales:
+                raise ValueError("compact kernel sizes must match Look scales")
+            self.compact_geometries = nn.ModuleList(
+                HexPatchGeometry(
+                    self.image_size, self.in_channels, kernel_size,
+                    int(compact_lattice_stride),
+                )
+                for kernel_size in kernel_sizes
+            )
+            for geometry in self.compact_geometries:
+                if not torch.equal(geometry.patch_centers_xy, self.patch_centers_xy):
+                    raise ValueError(
+                        "compact Look geometry must share tokenizer patch centers"
+                    )
+            counts = torch.tensor(
+                [angular_step * (radius + 1) for radius in range(prototype_radial_bins)],
+                dtype=torch.long,
+            )
+            offsets = torch.cat((torch.zeros(1, dtype=torch.long), counts.cumsum(0)))
+            self.register_buffer("ring_counts", counts, persistent=False)
+            self.register_buffer("ring_offsets", offsets, persistent=False)
+            self.compact_renderers = nn.ModuleList(
+                _PolarRenderer(
+                    geometry,
+                    radial_bins=prototype_radial_bins,
+                    ring_counts=counts,
+                    ring_offsets=offsets,
+                    directions=self.source_directions,
+                    direction_step=self.direction_step_radians,
+                )
+                for geometry in self.compact_geometries
+            )
+            self.match_prototype = nn.Parameter(torch.randn(
+                self.num_heads, self.in_channels, int(offsets[-1])
+            ) * 0.02)
+            reference_cover_mass = self.compact_renderers[0].support_cover.sum()
+            for index, renderer in enumerate(self.compact_renderers):
+                raw_cover = renderer.support_cover
+                cover = raw_cover * (reference_cover_mass / raw_cover.sum())
+                self.register_buffer(
+                    f"compact_scale_cover_{index}", cover, persistent=False
+                )
+        else:
+            self.ring_sampler = PolarRingSampler(
+                radial_bins=prototype_radial_bins,
+                angular_bins=prototype_angular_bins,
+                rotation_samples=source_direction_period,
+                scales=scales,
+            )
+            self.match_prototype = nn.Parameter(torch.empty(
+                self.num_heads,
+                self.in_channels,
+                prototype_radial_bins,
+                prototype_angular_bins,
+            ))
+            nn.init.normal_(
+                self.match_prototype,
+                std=1.0 / math.sqrt(in_channels * prototype_radial_bins),
+            )
         self.null_score = nn.Parameter(torch.zeros(self.num_heads))
         # Zero makes insertion exactly equivalent to the original attention.
         # The table itself receives gradients immediately; prototype gradients
@@ -120,7 +180,7 @@ class SquarePatchDenseGridLook(nn.Module):
 
     @property
     def num_scales(self) -> int:
-        return self.ring_sampler.num_scales
+        return self._num_scales
 
     @property
     def direction_step_radians(self) -> float:
@@ -180,7 +240,7 @@ class SquarePatchDenseGridLook(nn.Module):
         image: torch.Tensor,
         *,
         track_input_grad: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor | list[torch.Tensor], torch.Tensor]:
         if image.shape[-2:] != (self.image_size, self.image_size):
             raise ValueError(
                 f"expected image spatial size {(self.image_size, self.image_size)}, "
@@ -188,6 +248,15 @@ class SquarePatchDenseGridLook(nn.Module):
             )
         context = torch.enable_grad if track_input_grad else torch.no_grad
         with context():
+            if self.compact_variable_rings:
+                patches = [
+                    weighted_patch_flat(
+                        geometry(image),
+                        getattr(self, f"compact_scale_cover_{scale_index}"),
+                    )
+                    for scale_index, geometry in enumerate(self.compact_geometries)
+                ]
+                return patches, image.new_empty(0)
             return self.ring_sampler(
                 image,
                 self.patch_centers_xy,
@@ -197,9 +266,19 @@ class SquarePatchDenseGridLook(nn.Module):
 
     def raw_pose_response(
         self,
-        rings: torch.Tensor,
+        rings: torch.Tensor | list[torch.Tensor],
         coverage: torch.Tensor,
     ) -> torch.Tensor:
+        if self.compact_variable_rings:
+            if not isinstance(rings, list) or len(rings) != self.num_scales:
+                raise ValueError("compact rings must be one flattened patch tensor per scale")
+            scores = [
+                rotating_dot_score(patch, renderer(self.match_prototype))
+                for patch, renderer in zip(rings, self.compact_renderers)
+            ]
+            return torch.stack(scores, dim=3)
+        if not isinstance(rings, torch.Tensor):
+            raise ValueError("dense rings must be a tensor")
         response = self.ring_sampler.circular_match(
             rings,
             self.match_prototype,
@@ -210,7 +289,7 @@ class SquarePatchDenseGridLook(nn.Module):
 
     def pose_weights(
         self,
-        rings: torch.Tensor,
+        rings: torch.Tensor | list[torch.Tensor],
         coverage: torch.Tensor,
     ) -> torch.Tensor:
         """Return real-pose mass ``(B,N,H,S,T)`` after dropping null."""
@@ -266,7 +345,7 @@ class SquarePatchDenseGridLook(nn.Module):
 
     def forward_rings(
         self,
-        rings: torch.Tensor,
+        rings: torch.Tensor | list[torch.Tensor],
         coverage: torch.Tensor,
         *,
         include_cls: bool = True,
