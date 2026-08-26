@@ -294,12 +294,16 @@ class SquarePatchDenseGridLook(nn.Module):
     ) -> torch.Tensor:
         """Return real-pose mass ``(B,N,H,S,T)`` after dropping null."""
         response = self.raw_pose_response(rings, coverage)
-        flat = response.flatten(-2)
-        null = self.null_score.to(flat).view(1, 1, -1, 1).expand(
+        response_shape = response.shape
+        # Compact Look matching is allowed to use AMP/Tensor Cores, but the
+        # routing distribution remains float32 so small pose/null differences
+        # are not lost in the softmax.
+        flat = response.float().flatten(-2)
+        null = self.null_score.float().view(1, 1, -1, 1).expand(
             flat.shape[0], flat.shape[1], -1, 1
         )
         weights = torch.softmax(torch.cat((flat, null), dim=-1), dim=-1)
-        return weights[..., :-1].reshape_as(response)
+        return weights[..., :-1].reshape(response_shape)
 
     def transformed_look_grids(self) -> torch.Tensor:
         """Render the shared grid at every scale and direction: ``(H,S,T,N,N)``."""

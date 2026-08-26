@@ -127,8 +127,14 @@ class DeiTTinyRotHexLook(nn.Module):
             rings, coverage = self.look_bank.extract_rings(
                 image.float(), track_input_grad=False
             )
-            pose_weights = self.look_bank.pose_weights(rings, coverage)
             fields = self.look_bank.transformed_look_grids()
+            if not self.look_bank.compact_variable_rings:
+                # Preserve the established dense-ring baseline exactly.
+                pose_weights = self.look_bank.pose_weights(rings, coverage)
+        if self.look_bank.compact_variable_rings:
+            # Restore the caller's AMP context for the large K24/K12 GEMMs.
+            # pose_weights() promotes only the small routing softmax to fp32.
+            pose_weights = self.look_bank.pose_weights(rings, coverage)
         pose_weights = pose_weights.flatten(-2)
         fields = fields.flatten(1, 2)
         for layer_index, block in enumerate(self.blocks):

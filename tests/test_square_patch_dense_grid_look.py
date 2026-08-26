@@ -70,3 +70,26 @@ def test_dense_grid_and_match_prototype_receive_gradients() -> None:
     for parameter in (look.match_prototype, look.look_grid, look.null_score):
         assert parameter.grad is not None
         assert torch.isfinite(parameter.grad).all()
+
+
+def test_pose_softmax_promotes_half_precision_match_scores_to_float32(
+    monkeypatch,
+) -> None:
+    look = small_look(2)
+    response = torch.randn(
+        1,
+        look.num_patches,
+        look.num_heads,
+        look.num_scales,
+        look.source_directions,
+        dtype=torch.float16,
+    )
+    monkeypatch.setattr(
+        look,
+        "raw_pose_response",
+        lambda rings, coverage: response,
+    )
+    weights = look.pose_weights(torch.empty(0), torch.empty(0))
+    assert weights.dtype == torch.float32
+    assert weights.shape == response.shape
+    assert torch.isfinite(weights).all()
