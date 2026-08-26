@@ -58,12 +58,19 @@ class MultiHeadSelfAttention(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=True)
         self.proj_drop = nn.Dropout(proj_dropout)
 
-    def forward(self, x: torch.Tensor, attn_bias: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_bias: torch.Tensor | None = None,
+        structured_look: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         bsz, seq_len, dim = x.shape
         qkv = self.qkv(x)  # (B, N, 3D)
         qkv = qkv.reshape(bsz, seq_len, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # (B, H, N, Hd)
 
+        if attn_bias is not None and structured_look is not None:
+            raise ValueError("attn_bias and structured_look are mutually exclusive")
         if attn_bias is not None:
             static_shape = (self.num_heads, seq_len, seq_len)
             dynamic_shape = (bsz, self.num_heads, seq_len, seq_len)
@@ -78,7 +85,14 @@ class MultiHeadSelfAttention(nn.Module):
             # dynamically constructed per-layer look bias may be non-contiguous.
             attn_bias = attn_bias.to(device=x.device, dtype=q.dtype).contiguous()
 
-        if hasattr(F, "scaled_dot_product_attention") and attn_bias is None:
+        if structured_look is not None:
+            from layers.triton_structured_look_attention import structured_look_attention
+
+            pose, fields = structured_look
+            out = structured_look_attention(
+                q, k, v, pose, fields, scale=self.scale
+            )
+        elif hasattr(F, "scaled_dot_product_attention") and attn_bias is None:
             out = F.scaled_dot_product_attention(
                 q,
                 k,
@@ -125,8 +139,15 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim, eps=norm_eps)
         self.mlp = MLP(dim, hidden_dim=int(dim * mlp_ratio), dropout=dropout)
 
-    def forward(self, x: torch.Tensor, attn_bias: torch.Tensor | None = None) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), attn_bias=attn_bias)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_bias: torch.Tensor | None = None,
+        structured_look: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        x = x + self.attn(
+            self.norm1(x), attn_bias=attn_bias, structured_look=structured_look
+        )
         x = x + self.mlp(self.norm2(x))
         return x
 

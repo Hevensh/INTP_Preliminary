@@ -101,15 +101,22 @@ class DeiTTinyRotHexLook(nn.Module):
         # The image-to-ring preprocessing is intentionally immutable. Look
         # prototypes and grids remain trainable, while P0 is shared once.
         with torch.autocast(device_type=image.device.type, enabled=False):
-            all_bias, _ = self.look_bank(
-                image.float(), include_cls=True, track_input_grad=False
+            rings, coverage = self.look_bank.extract_rings(
+                image.float(), track_input_grad=False
             )
-        all_bias = all_bias.reshape(
-            image.shape[0], self.depth, self.num_heads,
-            tokens.shape[1], tokens.shape[1],
-        )
+            pose_weights = self.look_bank.pose_weights(rings, coverage)
+            fields = self.look_bank.transformed_look_grids()
+        pose_weights = pose_weights.flatten(-2)
+        fields = fields.flatten(1, 2)
         for layer_index, block in enumerate(self.blocks):
-            tokens = block(tokens, attn_bias=all_bias[:, layer_index])
+            start = layer_index * self.num_heads
+            stop = start + self.num_heads
+            layer_pose = pose_weights[:, :, start:stop]
+            layer_fields = fields[start:stop]
+            tokens = block(
+                tokens,
+                structured_look=(layer_pose, layer_fields),
+            )
         return self.norm(tokens)
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:

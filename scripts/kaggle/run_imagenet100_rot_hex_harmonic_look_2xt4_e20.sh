@@ -4,7 +4,7 @@ set -euo pipefail
 DATA_ROOT="${DATA_ROOT:-/kaggle/input/datasets/ambityga/imagenet100}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/kaggle/working/runs}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
+BATCH_SIZE="${BATCH_SIZE:-256}"
 EPOCHS="${EPOCHS:-20}"
 NAME="deit_tiny_rot_hex_harmonic_look_imagenet100_ddp_e20"
 RUN_DIR="${OUTPUT_ROOT}/${NAME}"
