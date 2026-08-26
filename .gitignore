@@ -4,6 +4,7 @@ scripts/data/
 *__pycache__
 checkpoints
 archive/
+.artifacts/
 .triton_cache/
 diagnostics/
 references/
