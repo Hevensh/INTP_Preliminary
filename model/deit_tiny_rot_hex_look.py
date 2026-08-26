@@ -28,6 +28,7 @@ class DeiTTinyRotHexLook(nn.Module):
         directions: int = 4,
         global_directions: int = 8,
         prototype_chunk_size: int = 16,
+        tokenizer_null_initial_score: float = 0.0,
     ) -> None:
         super().__init__()
         self.embed_dim = 192
@@ -44,8 +45,9 @@ class DeiTTinyRotHexLook(nn.Module):
             directions=directions,
             global_directions=global_directions,
             prototype_chunk_size=prototype_chunk_size,
-            pose_softmax=False,
-            use_null=False,
+            pose_softmax=True,
+            use_null=True,
+            null_initial_score=tokenizer_null_initial_score,
             match_metric="dot",
         )
         token_count = self.patch_embed.num_patches + 1

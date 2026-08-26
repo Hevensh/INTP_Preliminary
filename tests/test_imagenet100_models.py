@@ -9,7 +9,7 @@ from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPat
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 
 
-def _build(variant: str):
+def _build(variant: str, **kwargs):
     return build_imagenet100_model(
         variant=variant,
         model_name="deit_tiny_patch16_224",
@@ -18,6 +18,7 @@ def _build(variant: str):
         image_size=224,
         hex_kernel_size=21,
         hex_stride=18,
+        **kwargs,
     )
 
 
@@ -245,6 +246,26 @@ def test_rotating_harmonic_softmax_model_keeps_hex_token_and_pe_shapes():
     assert model.patch_embed.use_null
     assert model.patch_embed.num_patches == 195
     assert model.pos_embed.shape == (1, 196, 192)
+
+
+@pytest.mark.parametrize(
+    ("variant", "use_pos_embed"),
+    [
+        ("rot_hex_harmonic_look", False),
+        ("rot_hex_harmonic_pe_look", True),
+    ],
+)
+def test_rotating_harmonic_look_variants_use_null_softmax_in_both_routes(
+    variant: str,
+    use_pos_embed: bool,
+):
+    model = _build(variant, rot_null_initial_score=0.0)
+    assert model.use_pos_embed is use_pos_embed
+    assert model.patch_embed.pose_softmax
+    assert model.patch_embed.use_null
+    assert torch.all(model.patch_embed.null_score == 0)
+    assert model.look_bank.null_score.shape == (36,)
+    assert torch.all(model.look_bank.null_score == 0)
 
 
 def test_relative_l1_harmonic_uses_zero_baseline_and_negative_null():

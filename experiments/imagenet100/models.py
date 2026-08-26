@@ -63,6 +63,7 @@ def build_imagenet100_model(
             directions=rot_directions,
             global_directions=rot_global_directions,
             prototype_chunk_size=rot_prototype_chunk_size,
+            tokenizer_null_initial_score=rot_null_initial_score,
         )
 
     model = timm.create_model(
