@@ -86,9 +86,12 @@ class DeiTTinyRotHexLook(nn.Module):
             in_channels=3,
             num_heads=self.depth * self.num_heads,
             prototype_radial_bins=8,
-            prototype_angular_bins=16,
-            source_directions=4,
-            source_direction_period=8,
+            # Preserve two stored polar samples per full-period pose.  The
+            # default 4/8 half-circle search therefore remains 16 bins, while
+            # a 6/12 search uses 24 bins without angular-grid mismatch.
+            prototype_angular_bins=2 * global_directions,
+            source_directions=directions,
+            source_direction_period=global_directions,
             scales=(1.0, 0.5),
             prototype_radius=12.0,
             look_direction_bins=8,

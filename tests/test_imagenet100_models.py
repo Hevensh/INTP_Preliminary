@@ -271,6 +271,22 @@ def test_rotating_harmonic_look_variants_use_null_softmax_in_both_routes(
     assert torch.all(model.look_bank.null_score == 0)
 
 
+def test_half_six_look_model_uses_matching_twelve_pose_period():
+    model = _build(
+        "rot_hex_harmonic_look",
+        rot_directions=6,
+        rot_global_directions=12,
+        rot_null_initial_score=0.0,
+    )
+    assert model.pos_embed is None
+    assert model.patch_embed.directions == 6
+    assert model.patch_embed.direction_coefficients.shape == (6, 2)
+    assert model.look_bank.source_directions == 6
+    assert model.look_bank.source_direction_period == 12
+    assert model.look_bank.ring_sampler.angular_bins == 24
+    assert model.look_bank.ring_sampler.rotation_samples == 12
+
+
 def test_relative_l1_harmonic_uses_zero_baseline_and_negative_null():
     embed = HexRotatingHarmonicPatchEmbed(
         img_size=32,
