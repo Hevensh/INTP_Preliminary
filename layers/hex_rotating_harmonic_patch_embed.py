@@ -135,8 +135,8 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         for scale_index, (patch, renderer) in enumerate(zip(patches, self.renderers)):
             cover = getattr(self, f"scale_cover_{scale_index}")
             rendered = renderer(prototype)
-            weighted_patch = patch * cover[None, None, None]
             if self.match_metric == "dot":
+                weighted_patch = patch * cover[None, None, None]
                 score = torch.einsum(
                     "qncm,pdcm->qnpd", weighted_patch, rendered
                 )
@@ -144,21 +144,32 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
                 # Compare each prototype against the zero-prototype baseline:
                 #   score = ||x||_1,c - ||x - w||_1,c
                 # Multiplying x and w by the non-negative cover makes ordinary
-                # L1 distance exactly equal to the required weighted L1. cdist
-                # avoids materialising a B*N*P*D*C*M difference tensor.
-                patch_flat = weighted_patch.flatten(2)
+                # L1 distance exactly equal to the required weighted L1. The
+                # fused CUDA path streams the reduction without materialising
+                # a B*N*P*D*C*M difference tensor.
+                patch_flat = patch
                 rendered_flat = (
                     rendered * cover[None, None, None]
                 ).flatten(2)
-                distance = torch.cdist(
-                    patch_flat,
-                    rendered_flat.reshape(-1, rendered_flat.shape[-1]),
-                    p=1,
-                ).view(
+                flat_query = patch_flat.reshape(-1, patch_flat.shape[-1])
+                flat_prototype = rendered_flat.reshape(
+                    -1, rendered_flat.shape[-1]
+                )
+                if flat_query.is_cuda:
+                    from layers.triton_negative_l1 import negative_l1_distance
+
+                    negative_distance = negative_l1_distance(
+                        flat_query, flat_prototype
+                    )
+                else:
+                    negative_distance = -torch.cdist(
+                        flat_query, flat_prototype, p=1
+                    )
+                negative_distance = negative_distance.view(
                     patch.shape[0], patch.shape[1], stop - start, self.directions
                 )
                 zero_distance = patch_flat.abs().sum(-1)
-                score = zero_distance[:, :, None, None] - distance
+                score = zero_distance[:, :, None, None] + negative_distance
             pose_score = score if pose_score is None else pose_score + score
 
         if self.pose_softmax:
@@ -181,6 +192,16 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         with torch.autocast(device_type=image.device.type, enabled=False):
             image = image.float()
             patches = [geometry(image) for geometry in self.geometries]
+            if self.match_metric == "relative_l1":
+                # Each scale is weighted/flattened once and shared by every
+                # prototype chunk. This avoids retaining six duplicate K24/K12
+                # patch tensors until backward at the default 96/16 split.
+                patches = [
+                    (patch * getattr(self, f"scale_cover_{scale_index}")[
+                        None, None, None
+                    ]).flatten(2).contiguous()
+                    for scale_index, patch in enumerate(patches)
+                ]
             chunks = [
                 self._chunk_response(
                     patches,
