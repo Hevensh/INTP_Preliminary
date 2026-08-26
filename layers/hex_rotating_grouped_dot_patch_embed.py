@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from layers.hex_patch_geometry import HexPatchGeometry
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
+from layers.rotating_dot_product import rotating_dot_score, weighted_patch_flat
 
 
 class HexRotatingGroupedDotPatchEmbed(nn.Module):
@@ -144,13 +145,8 @@ class HexRotatingGroupedDotPatchEmbed(nn.Module):
         prototype = self.prototype[start:stop]
         scale_scores = []
         for scale_index, (patch, renderer) in enumerate(zip(patches, self.renderers)):
-            cover = getattr(self, f"scale_cover_{scale_index}")
             rendered = renderer(prototype)
-            score = torch.einsum(
-                "qncm,pdcm->qnpd",
-                patch * cover[None, None, None],
-                rendered,
-            )
+            score = rotating_dot_score(patch, rendered)
             scale_scores.append(score)
         scores = torch.stack(scale_scores, dim=3)  # B, N, P, S, D
         flat_scores = scores.flatten(3, 4)
@@ -184,7 +180,12 @@ class HexRotatingGroupedDotPatchEmbed(nn.Module):
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         with torch.autocast(device_type=image.device.type, enabled=False):
             image = image.float()
-            patches = [geometry(image) for geometry in self.geometries]
+            patches = [
+                weighted_patch_flat(
+                    geometry(image), getattr(self, f"scale_cover_{scale_index}")
+                )
+                for scale_index, geometry in enumerate(self.geometries)
+            ]
             group_outputs = []
             for group in range(self.groups):
                 group_start = group * self.bases_per_group

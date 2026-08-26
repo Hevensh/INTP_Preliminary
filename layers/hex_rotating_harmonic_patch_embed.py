@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from layers.hex_patch_geometry import HexPatchGeometry
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
+from layers.rotating_dot_product import rotating_dot_score, weighted_patch_flat
 
 
 class HexRotatingHarmonicPatchEmbed(nn.Module):
@@ -136,10 +137,7 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
             cover = getattr(self, f"scale_cover_{scale_index}")
             rendered = renderer(prototype)
             if self.match_metric == "dot":
-                weighted_patch = patch * cover[None, None, None]
-                score = torch.einsum(
-                    "qncm,pdcm->qnpd", weighted_patch, rendered
-                )
+                score = rotating_dot_score(patch, rendered)
             else:
                 # Compare each prototype against the zero-prototype baseline:
                 #   score = ||x||_1,c - ||x - w||_1,c
@@ -192,16 +190,15 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         with torch.autocast(device_type=image.device.type, enabled=False):
             image = image.float()
             patches = [geometry(image) for geometry in self.geometries]
-            if self.match_metric == "relative_l1":
-                # Each scale is weighted/flattened once and shared by every
-                # prototype chunk. This avoids retaining six duplicate K24/K12
-                # patch tensors until backward at the default 96/16 split.
-                patches = [
-                    (patch * getattr(self, f"scale_cover_{scale_index}")[
-                        None, None, None
-                    ]).flatten(2).contiguous()
-                    for scale_index, patch in enumerate(patches)
-                ]
+            # Each scale is weighted/flattened once and shared by every
+            # prototype chunk. This avoids retaining six duplicate K24/K12
+            # patch tensors until backward at the default 96/16 split.
+            patches = [
+                weighted_patch_flat(
+                    patch, getattr(self, f"scale_cover_{scale_index}")
+                )
+                for scale_index, patch in enumerate(patches)
+            ]
             chunks = [
                 self._chunk_response(
                     patches,

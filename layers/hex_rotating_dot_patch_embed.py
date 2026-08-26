@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from layers.hex_patch_geometry import HexPatchGeometry
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
+from layers.rotating_dot_product import rotating_dot_score, weighted_patch_flat
 
 
 class HexRotatingDotPatchEmbed(nn.Module):
@@ -126,8 +127,7 @@ class HexRotatingDotPatchEmbed(nn.Module):
         scale_scores = []
         for scale_index, (patch, renderer) in enumerate(zip(patches, self.renderers)):
             rendered = renderer(prototype)
-            weighted_patch = patch * renderer.support_cover[None, None, None]
-            score = torch.einsum("qncm,pdcm->qnpd", weighted_patch, rendered)
+            score = rotating_dot_score(patch, rendered)
             score = score * self.dot_multipliers[scale_index]
             score = score * torch.exp(
                 self.logit_gain[start:stop, scale_index]
@@ -147,7 +147,10 @@ class HexRotatingDotPatchEmbed(nn.Module):
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         with torch.autocast(device_type=image.device.type, enabled=False):
             image = image.float()
-            patches = [geometry(image) for geometry in self.geometries]
+            patches = [
+                weighted_patch_flat(geometry(image), renderer.support_cover)
+                for geometry, renderer in zip(self.geometries, self.renderers)
+            ]
             features = [
                 self._chunk_features(
                     patches, start, min(start + self.prototype_chunk_size, self.bases)
