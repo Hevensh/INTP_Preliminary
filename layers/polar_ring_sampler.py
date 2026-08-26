@@ -144,6 +144,8 @@ class PolarRingSampler(nn.Module):
         rings: torch.Tensor,
         prototypes: torch.Tensor,
         coverage: torch.Tensor | None = None,
+        *,
+        rotation_count: int | None = None,
     ) -> torch.Tensor:
         """One-sided normalized circular correlation, ``(B,N,H,S,T)``.
 
@@ -165,6 +167,10 @@ class PolarRingSampler(nn.Module):
             raise ValueError("rings do not match sampler dimensions")
         if prototypes.shape[-2:] != (self.radial_bins, self.angular_bins):
             raise ValueError("prototypes do not match sampler dimensions")
+        if rotation_count is None:
+            rotation_count = self.rotation_samples
+        if not 1 <= rotation_count <= self.rotation_samples:
+            raise ValueError("rotation_count must be in [1, rotation_samples]")
 
         rho = torch.linspace(
             self.rho_min, 1.0, self.radial_bins,
@@ -184,7 +190,11 @@ class PolarRingSampler(nn.Module):
         mask_windows = doubled_mask.unfold(-1, self.angular_bins, 1)[..., : self.angular_bins, :]
         stride = self.angular_bins // self.rotation_samples
         shifts = torch.arange(
-            0, self.angular_bins, stride, device=rings.device, dtype=torch.long
+            0,
+            rotation_count * stride,
+            stride,
+            device=rings.device,
+            dtype=torch.long,
         )
         windows = windows.index_select(-2, shifts)
         mask_windows = mask_windows.index_select(-2, shifts)

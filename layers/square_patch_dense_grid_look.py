@@ -201,9 +201,12 @@ class SquarePatchDenseGridLook(nn.Module):
         coverage: torch.Tensor,
     ) -> torch.Tensor:
         response = self.ring_sampler.circular_match(
-            rings, self.match_prototype, coverage
+            rings,
+            self.match_prototype,
+            coverage,
+            rotation_count=self.source_directions,
         )
-        return response[..., : self.source_directions]
+        return response
 
     def pose_weights(
         self,

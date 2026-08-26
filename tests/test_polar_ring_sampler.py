@@ -44,6 +44,25 @@ def test_circular_match_recovers_known_angular_shift() -> None:
     assert response[0, 0, 0, 0, target_rotation].item() > 0.999
 
 
+def test_partial_rotation_match_is_exact_prefix_of_full_period() -> None:
+    torch.manual_seed(4)
+    sampler = PolarRingSampler(
+        radial_bins=4,
+        angular_bins=24,
+        rotation_samples=12,
+        scales=(1.0, 0.5),
+    )
+    rings = torch.randn(2, 3, 2, 2, 4, 24)
+    prototype = torch.randn(5, 2, 4, 24)
+    coverage = torch.ones(2, 4, 24)
+    full = sampler.circular_match(rings, prototype, coverage)
+    half = sampler.circular_match(
+        rings, prototype, coverage, rotation_count=6
+    )
+    assert half.shape == (2, 3, 5, 2, 6)
+    torch.testing.assert_close(half, full[..., :6])
+
+
 def test_sampling_and_circular_match_are_differentiable() -> None:
     torch.manual_seed(5)
     sampler = PolarRingSampler(
