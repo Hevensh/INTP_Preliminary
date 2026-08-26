@@ -261,6 +261,9 @@ def test_rotating_harmonic_look_variants_use_null_softmax_in_both_routes(
 ):
     model = _build(variant, rot_null_initial_score=0.0)
     assert model.use_pos_embed is use_pos_embed
+    assert (model.pos_embed is not None) is use_pos_embed
+    if model.pos_embed is not None:
+        assert model.pos_embed.requires_grad
     assert model.patch_embed.pose_softmax
     assert model.patch_embed.use_null
     assert torch.all(model.patch_embed.null_score == 0)

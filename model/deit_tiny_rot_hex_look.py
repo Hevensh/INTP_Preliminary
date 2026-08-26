@@ -52,7 +52,12 @@ class DeiTTinyRotHexLook(nn.Module):
         )
         token_count = self.patch_embed.num_patches + 1
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, token_count, self.embed_dim))
+        if self.use_pos_embed:
+            self.pos_embed = nn.Parameter(
+                torch.zeros(1, token_count, self.embed_dim)
+            )
+        else:
+            self.register_parameter("pos_embed", None)
         self.pos_drop = nn.Dropout(0.0)
         self.blocks = nn.ModuleList(
             TransformerBlock(
@@ -70,7 +75,8 @@ class DeiTTinyRotHexLook(nn.Module):
         # active. This makes the two ablation arms differ only by PE usage.
         self.apply(init_vit_weights)
         nn.init.trunc_normal_(self.cls_token, std=0.02)
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        if self.pos_embed is not None:
+            nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         coo = self.patch_embed.coo_patchs
         patch_coordinates = torch.stack((coo.real, coo.imag), dim=-1)
@@ -96,7 +102,7 @@ class DeiTTinyRotHexLook(nn.Module):
         tokens = self.patch_embed(image)
         cls = self.cls_token.expand(tokens.shape[0], -1, -1)
         tokens = torch.cat((cls, tokens), dim=1)
-        if self.use_pos_embed:
+        if self.pos_embed is not None:
             tokens = tokens + self.pos_embed
         tokens = self.pos_drop(tokens)
 
