@@ -10,6 +10,8 @@ diagnostics/
 references/
 visualization/
 imgs/
+downloads/
+essay_docu/
 diagnostics/results/_smoke_*.json
 diagnostics/results/_smoke_*.pt
 *.pt
