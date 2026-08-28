@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from torch.utils.data.distributed import DistributedSampler
 from experiments.imagenet100.data import (
     build_imagefolder_loaders,
     discover_imagefolder_splits,
-    index_imagefolder_samples,
+    load_or_index_imagefolder_samples,
 )
 from experiments.imagenet100.models import MODEL_VARIANTS, build_imagenet100_model
 
@@ -134,7 +134,11 @@ def _distributed_context(requested_device: str) -> DistributedContext:
         if not torch.cuda.is_available():
             raise RuntimeError("torchrun requested distributed CUDA, but CUDA is unavailable")
         torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend="nccl", init_method="env://")
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            timeout=timedelta(minutes=30),
+        )
         return DistributedContext(rank, local_rank, world_size, torch.device("cuda", local_rank))
     if requested_device == "auto":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -480,7 +484,18 @@ def main() -> None:
             f"[data] found {len(splits.classes)} classes; indexing image paths...",
             flush=True,
         )
-        train_index, val_index = index_imagefolder_samples(splits)
+        default_cache_dir = (
+            Path(config.output_root).expanduser().resolve().parent
+            / ".intp_image_index_cache"
+        )
+        cache_dir = os.environ.get("INTP_IMAGE_INDEX_CACHE", str(default_cache_dir))
+        train_index, val_index, cache_hit, cache_path = (
+            load_or_index_imagefolder_samples(splits, cache_dir=cache_dir)
+        )
+        print(
+            f"[data] index cache {'hit' if cache_hit else 'created'}: {cache_path}",
+            flush=True,
+        )
         indexed_payload[0] = (splits, train_index, val_index)
     if distributed.enabled:
         # ImageFolder otherwise walks all 135k files independently on every

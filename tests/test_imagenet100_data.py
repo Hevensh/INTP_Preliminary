@@ -6,6 +6,7 @@ from experiments.imagenet100.data import (
     build_imagefolder_loaders,
     discover_imagefolder_splits,
     index_imagefolder_samples,
+    load_or_index_imagefolder_samples,
 )
 
 
@@ -80,3 +81,47 @@ def test_distributed_loaders_partition_training_indices(tmp_path: Path) -> None:
     assert rank0.isdisjoint(rank1)
     assert rank0 | rank1 == set(range(8))
     assert len(loaders[0][1].sampler) == len(loaders[1][1].sampler) == 4
+
+
+def test_image_index_cache_is_reused(tmp_path: Path, monkeypatch) -> None:
+    for split in ("train", "val"):
+        for class_name in ("n0001", "n0002"):
+            _write_image(tmp_path / split / class_name / "sample.jpg")
+    splits = discover_imagefolder_splits(tmp_path, expected_classes=2)
+    cache_dir = tmp_path / "cache"
+
+    expected_train, expected_val, hit, cache_path = load_or_index_imagefolder_samples(
+        splits, cache_dir=cache_dir
+    )
+    assert not hit
+    assert cache_path.is_file()
+
+    def fail_if_reindexed(*args, **kwargs):
+        raise AssertionError("cache hit should not walk the image folders again")
+
+    monkeypatch.setattr("experiments.imagenet100.data._index_roots", fail_if_reindexed)
+    train, val, hit, reused_path = load_or_index_imagefolder_samples(
+        splits, cache_dir=cache_dir
+    )
+    assert hit
+    assert reused_path == cache_path
+    assert train == expected_train
+    assert val == expected_val
+
+
+def test_image_index_cache_recovers_from_invalid_json(tmp_path: Path) -> None:
+    for split in ("train", "val"):
+        for class_name in ("n0001", "n0002"):
+            _write_image(tmp_path / split / class_name / "sample.jpg")
+    splits = discover_imagefolder_splits(tmp_path, expected_classes=2)
+    cache_dir = tmp_path / "cache"
+    _, _, _, cache_path = load_or_index_imagefolder_samples(
+        splits, cache_dir=cache_dir
+    )
+    cache_path.write_text("not-json", encoding="utf-8")
+
+    train, val, hit, _ = load_or_index_imagefolder_samples(
+        splits, cache_dir=cache_dir
+    )
+    assert not hit
+    assert len(train) == len(val) == 2

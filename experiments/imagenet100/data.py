@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Sequence
+from typing import Any
 
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, Subset
 from torchvision import transforms
@@ -14,6 +18,7 @@ from torchvision.transforms import InterpolationMode
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 TRAIN_NAMES = {"train", "training"}
 VAL_NAMES = {"val", "valid", "validation"}
+IMAGE_INDEX_CACHE_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,90 @@ def index_imagefolder_samples(
         _index_roots(splits.train, splits.classes),
         _index_roots((splits.val,), splits.classes),
     )
+
+
+def _image_index_signature(splits: ImageFolderSplits) -> dict[str, Any]:
+    return {
+        "version": IMAGE_INDEX_CACHE_VERSION,
+        "train": [str(path.resolve()) for path in splits.train],
+        "val": str(splits.val.resolve()),
+        "classes": list(splits.classes),
+    }
+
+
+def _validate_cached_samples(
+    raw: Any,
+    *,
+    class_count: int,
+) -> list[tuple[str, int]]:
+    if not isinstance(raw, list):
+        raise ValueError("cached samples must be a list")
+    samples: list[tuple[str, int]] = []
+    for item in raw:
+        if (
+            not isinstance(item, list)
+            or len(item) != 2
+            or not isinstance(item[0], str)
+            or not isinstance(item[1], int)
+            or isinstance(item[1], bool)
+            or not 0 <= item[1] < class_count
+        ):
+            raise ValueError("cached sample has an invalid path or target")
+        samples.append((item[0], item[1]))
+    if not samples:
+        raise ValueError("cached sample list is empty")
+    return samples
+
+
+def load_or_index_imagefolder_samples(
+    splits: ImageFolderSplits,
+    *,
+    cache_dir: str | Path,
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]], bool, Path]:
+    """Load a reusable ImageFolder manifest or atomically create one.
+
+    Kaggle input datasets are immutable during a notebook session, so the
+    resolved split roots and class ordering form a stable cache identity. A
+    malformed or stale cache is ignored and replaced with a fresh manifest.
+    """
+
+    signature = _image_index_signature(splits)
+    digest = hashlib.sha256(
+        json.dumps(signature, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+    cache_root = Path(cache_dir).expanduser().resolve()
+    cache_path = cache_root / f"imagefolder-index-v{IMAGE_INDEX_CACHE_VERSION}-{digest}.json"
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        if payload.get("signature") != signature:
+            raise ValueError("cache signature does not match")
+        train = _validate_cached_samples(
+            payload.get("train"), class_count=len(splits.classes)
+        )
+        val = _validate_cached_samples(
+            payload.get("val"), class_count=len(splits.classes)
+        )
+        return train, val, True, cache_path
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        pass
+
+    train, val = index_imagefolder_samples(splits)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "signature": signature,
+        "train": train,
+        "val": val,
+    }
+    temporary = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temporary, cache_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return train, val, False, cache_path
 
 
 def _directories_to_depth(root: Path, max_depth: int = 5) -> list[Path]:
