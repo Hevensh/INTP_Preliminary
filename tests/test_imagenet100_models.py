@@ -285,6 +285,21 @@ def test_half_six_look_model_uses_matching_twelve_pose_period():
     assert model.look_bank.source_direction_period == 12
     assert model.look_bank.ring_sampler.angular_bins == 24
     assert model.look_bank.ring_sampler.rotation_samples == 12
+    assert model.look_direction_bins == 12
+    assert model.look_radial_bins == 4
+    assert model.look_bank.look_grid.shape == (36, 4, 12)
+
+
+def test_half_four_look_model_keeps_eight_by_four_look_field():
+    model = _build(
+        "rot_hex_harmonic_pe_look",
+        rot_directions=4,
+        rot_global_directions=8,
+        rot_null_initial_score=0.0,
+    )
+    assert model.look_direction_bins == 8
+    assert model.look_radial_bins == 4
+    assert model.look_bank.look_grid.shape == (36, 4, 8)
 
 
 def test_half_six_compact_r3_look_shares_tokenizer_variable_ring_storage():

@@ -13,7 +13,9 @@ class DeiTTinyRotHexLook(nn.Module):
 
     The 36 Look prototypes correspond exactly to 12 Transformer layers times
     three attention heads. P0 rings are extracted once, then each layer/head
-    produces its own directed 8-direction x 4-radius attention bias.
+    produces its own directed attention bias.  By default, the Look field uses
+    the tokenizer's full pose period for its angular resolution and twice the
+    tokenizer scale count for its radial resolution.
     """
 
     def __init__(
@@ -83,6 +85,12 @@ class DeiTTinyRotHexLook(nn.Module):
 
         coo = self.patch_embed.coo_patchs
         patch_coordinates = torch.stack((coo.real, coo.imag), dim=-1)
+        # Keep the Look lattice structurally coupled to the tokenizer instead
+        # of silently retaining an 8 x 4 field when the geometric pose search
+        # changes.  A half-6 / full-12 tokenizer therefore uses 12 x 4, while
+        # the established half-4 / full-8 tokenizer remains 8 x 4.
+        self.look_direction_bins = int(global_directions)
+        self.look_radial_bins = 2 * len(kernel_sizes)
         self.look_bank = SquarePatchDenseGridLook(
             image_size=image_size,
             patch_size=16,
@@ -97,8 +105,8 @@ class DeiTTinyRotHexLook(nn.Module):
             source_direction_period=global_directions,
             scales=(1.0, 0.5),
             prototype_radius=12.0,
-            look_direction_bins=8,
-            look_radial_bins=4,
+            look_direction_bins=self.look_direction_bins,
+            look_radial_bins=self.look_radial_bins,
             look_radius=4.0,
             patch_centers_xy=self.patch_embed.patch_centers_xy,
             patch_coordinates_xy=patch_coordinates,

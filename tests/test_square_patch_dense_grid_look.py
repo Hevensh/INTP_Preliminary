@@ -21,6 +21,24 @@ def small_look(num_heads: int = 2) -> SquarePatchDenseGridLook:
     )
 
 
+def test_default_look_resolution_follows_pose_period_and_scale_count() -> None:
+    look = SquarePatchDenseGridLook(
+        image_size=48,
+        patch_size=16,
+        num_heads=2,
+        prototype_radial_bins=4,
+        prototype_angular_bins=24,
+        source_directions=6,
+        source_direction_period=12,
+        scales=(1.0, 0.75, 0.5),
+        prototype_radius=8.0,
+        look_radius=2.0,
+    )
+    assert look.look_direction_bins == 12
+    assert look.look_radial_bins == 6
+    assert look.look_grid.shape == (2, 6, 12)
+
+
 def test_deit_dense_grid_has_one_prototype_and_grid_per_layer_head() -> None:
     model = DeiTTinySquareLook(num_classes=10, look_mode="dense_grid")
     look = model.look_bank

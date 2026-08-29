@@ -36,8 +36,8 @@ class SquarePatchDenseGridLook(nn.Module):
         source_direction_period: int = 8,
         scales: Sequence[float] = (1.0, 0.5),
         prototype_radius: float = 12.0,
-        look_direction_bins: int = 8,
-        look_radial_bins: int = 4,
+        look_direction_bins: int | None = None,
+        look_radial_bins: int | None = None,
         look_radius: float = 4.0,
         patch_centers_xy: torch.Tensor | None = None,
         patch_coordinates_xy: torch.Tensor | None = None,
@@ -47,6 +47,13 @@ class SquarePatchDenseGridLook(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
+        # Unless explicitly overridden for an ablation, couple the Look field
+        # to the geometry it routes: one angular bin per full-period probe and
+        # two radial bins per tokenizer scale.
+        if look_direction_bins is None:
+            look_direction_bins = int(source_direction_period)
+        if look_radial_bins is None:
+            look_radial_bins = 2 * len(scales)
         if min(
             image_size, patch_size, in_channels, num_heads,
             prototype_radial_bins, prototype_angular_bins,
