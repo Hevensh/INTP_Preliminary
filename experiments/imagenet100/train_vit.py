@@ -446,6 +446,7 @@ def _restore_checkpoint(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reproducible DeiT-Tiny ImageNet-100 training.")
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--experiment-name")
     parser.add_argument("--data-root")
     parser.add_argument("--output-root")
     parser.add_argument("--epochs", type=int)
@@ -453,7 +454,9 @@ def main() -> None:
     parser.add_argument("--resume")
     args = parser.parse_args()
     config = _load_config(args.config)
-    for name in ("data_root", "output_root", "epochs", "batch_size", "resume"):
+    for name in (
+        "experiment_name", "data_root", "output_root", "epochs", "batch_size", "resume"
+    ):
         value = getattr(args, name)
         if value is not None:
             setattr(config, name, value)

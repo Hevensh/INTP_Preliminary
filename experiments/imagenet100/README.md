@@ -86,3 +86,73 @@ automatically resumes from its `last.pt`; a completed arm is skipped. Use a new
 Each run stores its resolved config, environment, model summary, per-epoch
 metrics, best checkpoint, last checkpoint, and final summary below
 `/kaggle/working/runs` by default.
+
+## ResNet-18 MAMS branch
+
+This branch tests whether the geometric operator transfers beyond a ViT
+tokenizer. The standard arm is torchvision ResNet-18. In the MAMS arm, every
+two-3x3 BasicBlock is replaced as a whole by:
+
+```text
+MAMS(D6/D3, half4d4r, null-softmax, cos/sin)
+  -> BatchNorm -> ReLU -> 1x1 Conv -> BatchNorm -> residual add -> ReLU
+```
+
+The ordinary Cartesian feature grid, stem, stage widths, stride-2 shortcuts,
+global pooling, and classifier are retained. Diameter 6 uses a pixel-centred
+7x7 bounding window with a radius-3 circular support; diameter 3 uses a 3x3
+support at the same centers. Prototype initialization is scaled by each stage's
+input fan-in so deeper blocks do not receive sharper pose logits solely because
+they have more channels. A local AMP forward/backward probe used 2.20 GiB at
+batch 32 on an 8-GiB RTX 4060; the Kaggle default is therefore 128/GPU on each
+16-GiB T4, with `BATCH_SIZE=64` as the conservative fallback.
+
+Five-epoch smoke runs:
+
+```bash
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_resnet18_2xt4.sh
+
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_resnet18_mams_4d4r_d6d3_2xt4.sh
+```
+
+For the aligned 20-epoch comparison, prepend `EPOCHS=20`. The experiment name
+is derived from `EPOCHS`, so the five-epoch smoke artifact is not mistaken for
+or resumed as the 20-epoch run.
+
+### Controlled multi-scale and multi-angle comparisons
+
+Three whole-BasicBlock comparison variants use the same stem, residual
+shortcuts, stage widths, pooling, classifier, training config, and final 1x1
+mixing layer as the MAMS arm:
+
+| Variant | Spatial extractor before the 1x1 mixer | Pose retained? | Parameters |
+| --- | --- | ---: | ---: |
+| Standard ResNet-18 | two ordinary 3x3 convolutions | no | 11,227,812 |
+| Multi-scale | parallel learned 5x5 and 3x3 branches, concatenated | no | 9,851,556 |
+| RotConv-4 | one learned 5x5 bank, shared over 0/45/90/135 degrees, direction max | no | 14,045,860 |
+| Multi-scale RotConv-4 | independent 5x5/3x3 banks, each shared over four directions, direction max, concatenated | no | 9,851,556 |
+| MAMS | shared D6/D3 polar prototype, null-softmax and cos/sin projection | yes | 7,231,076 |
+
+These are controlled functional baselines, not claims of exact reproduction of
+an Inception, ORN, or group-equivariant network. In particular, RotConv removes
+its explicit orientation axis with max pooling so it can enter an otherwise
+unchanged ResNet-18; MAMS instead projects that pose distribution into paired
+cos/sin channels.
+
+Five-epoch smoke commands:
+
+```bash
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_resnet18_multiscale_2xt4.sh
+
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_resnet18_rotconv4_2xt4.sh
+
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_resnet18_multiscale_rotconv4_2xt4.sh
+```
+
+Use `EPOCHS=20` only after a variant passes the five-epoch convergence, runtime,
+and memory screen.

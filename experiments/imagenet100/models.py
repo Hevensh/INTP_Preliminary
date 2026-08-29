@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch.nn as nn
 import timm
+from torchvision.models import resnet18
 
 from layers.hex_linear_patch_embed import HexLinearPatchEmbed
 from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
@@ -9,9 +10,17 @@ from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
 from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
+from model.resnet_geometric_baselines import (
+    build_resnet18_multiscale,
+    build_resnet18_multiscale_rotconv,
+    build_resnet18_rotconv,
+)
+from model.resnet_mams import build_resnet18_mams
 
 
 MODEL_VARIANTS = {
+    "resnet18", "resnet18_multiscale", "resnet18_rotconv4",
+    "resnet18_multiscale_rotconv4", "resnet18_mams",
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
@@ -45,10 +54,47 @@ def build_imagenet100_model(
     rot_response_gate_location: str = "pose",
     rot_score_clamp: float = 4.0,
 ) -> nn.Module:
-    """Build matched DeiT-Tiny models that differ only in patch embedding."""
+    """Build the aligned ImageNet-100 comparison models."""
 
     if variant not in MODEL_VARIANTS:
         raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
+    if variant == "resnet18":
+        if pretrained:
+            raise ValueError("the ResNet comparison is trained from scratch")
+        return resnet18(weights=None, num_classes=num_classes)
+    if variant in {
+        "resnet18_multiscale",
+        "resnet18_rotconv4",
+        "resnet18_multiscale_rotconv4",
+    }:
+        if pretrained:
+            raise ValueError("the ResNet comparison is trained from scratch")
+        if variant == "resnet18_multiscale":
+            return build_resnet18_multiscale(num_classes=num_classes)
+        if variant == "resnet18_rotconv4":
+            return build_resnet18_rotconv(
+                num_classes=num_classes,
+                kernel_size=5,
+                directions=4,
+            )
+        return build_resnet18_multiscale_rotconv(
+            num_classes=num_classes,
+            kernel_sizes=(5, 3),
+            directions=4,
+        )
+    if variant == "resnet18_mams":
+        if pretrained:
+            raise ValueError("the MAMS ResNet comparison is trained from scratch")
+        return build_resnet18_mams(
+            num_classes=num_classes,
+            diameters=rot_kernel_sizes,
+            directions=rot_directions,
+            global_directions=rot_global_directions,
+            angular_bins_per_radius=rot_angular_bins_per_radius,
+            prototype_chunk_size=rot_prototype_chunk_size,
+            use_null=rot_use_null,
+            null_initial_score=rot_null_initial_score,
+        )
     if variant != "deit_tiny" and pretrained:
         raise ValueError(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
