@@ -188,6 +188,11 @@ def test_zero_gated_ring_variant_matches_existing_pe_look_model():
     baseline = _build("rot_hex_harmonic_pe_look").eval()
     torch.manual_seed(7)
     refined = _build("rot_hex_harmonic_pe_look_ring").eval()
+    assert refined.feature_ring_matcher.start_layer == 0
+    assert refined.feature_ring_matcher.active_depth == refined.depth
+    assert refined.feature_ring_matcher.look_grid.shape == (
+        refined.depth, refined.num_heads, 4, 12
+    )
     missing, unexpected = refined.load_state_dict(baseline.state_dict(), strict=False)
     assert not unexpected
     assert all("feature_ring_matcher" in key for key in missing)

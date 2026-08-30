@@ -60,7 +60,7 @@ class TwoRingCircularLookMatcher(nn.Module):
         depth: int,
         num_heads: int,
         head_dim: int,
-        start_layer: int = 8,
+        start_layer: int = 0,
     ) -> None:
         super().__init__()
         if min(depth, num_heads, head_dim) <= 0:

@@ -33,7 +33,7 @@ class DeiTTinyRotHexLook(nn.Module):
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
         feature_ring_look: bool = False,
-        feature_ring_start_layer: int = 8,
+        feature_ring_start_layer: int = 0,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
     ) -> None:

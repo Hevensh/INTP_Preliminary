@@ -66,7 +66,7 @@ radial resolution is twice the number of tokenizer scales. For example, the
 current `half6d3r` tokenizer uses a `12 direction x 4 radius` Look field.
 
 An experimental deep-feature refinement keeps the original image-derived Look
-path and augments only the final four Transformer blocks.  For every query token
+path and augments all twelve Transformer blocks by default.  For every query token
 it reads the exact first and second Hex graph rings, correlates the six inner
 neighbors over C6 and the twelve outer neighbors over C12, and ignores the
 center token.  Each layer/head stores only 6 + 12 shared `head_dim -> 1`
