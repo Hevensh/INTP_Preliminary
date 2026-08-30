@@ -4,7 +4,7 @@ set -euo pipefail
 DATA_ROOT="${DATA_ROOT:-/kaggle/input/datasets/ambityga/imagenet100}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/kaggle/working/runs}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-256}"
 EPOCHS="${EPOCHS:-5}"
 NAME="${EXPERIMENT_NAME:-resnet18_arc4bank_k3_imagenet100_ddp_e${EPOCHS}}"
 RUN_DIR="${OUTPUT_ROOT}/${NAME}"

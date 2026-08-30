@@ -147,7 +147,7 @@ The earlier whole-block K5/K3 comparison variants remain in the repository for
 result provenance, but should be treated as legacy and not used as the paper
 baselines.
 
-Five-epoch smoke commands:
+Five-epoch smoke commands use batch 256 per GPU (global batch 512 on 2xT4):
 
 ```bash
 DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
