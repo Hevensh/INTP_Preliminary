@@ -54,6 +54,8 @@ def build_imagenet100_model(
     look_compact_variable_rings: bool = False,
     feature_ring_look: bool = False,
     feature_ring_start_layer: int = 0,
+    feature_ring_group_size: int = 4,
+    feature_ring_frequency: bool = False,
     rot_prototype_chunk_size: int = 16,
     rot_use_null: bool = True,
     rot_null_initial_score: float = -1.0,
@@ -162,6 +164,8 @@ def build_imagenet100_model(
                 }
             ),
             feature_ring_start_layer=feature_ring_start_layer,
+            feature_ring_group_size=feature_ring_group_size,
+            feature_ring_frequency=feature_ring_frequency,
             prototype_chunk_size=rot_prototype_chunk_size,
             tokenizer_null_initial_score=rot_null_initial_score,
         )

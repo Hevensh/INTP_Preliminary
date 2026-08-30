@@ -34,6 +34,8 @@ class DeiTTinyRotHexLook(nn.Module):
         look_compact_variable_rings: bool = False,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
+        feature_ring_group_size: int = 4,
+        feature_ring_frequency: bool = False,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
     ) -> None:
@@ -124,6 +126,10 @@ class DeiTTinyRotHexLook(nn.Module):
             ),
         )
         self.feature_ring_look = bool(feature_ring_look)
+        if feature_ring_group_size <= 0:
+            raise ValueError("feature_ring_group_size must be positive")
+        self.feature_ring_group_size = int(feature_ring_group_size)
+        self.feature_ring_frequency = bool(feature_ring_frequency)
         if self.feature_ring_look:
             if global_directions != 12:
                 raise ValueError(
@@ -163,6 +169,7 @@ class DeiTTinyRotHexLook(nn.Module):
             pose_weights = self.look_bank.pose_weights(rings, coverage)
         pose_weights = pose_weights.flatten(-2)
         fields = fields.flatten(1, 2)
+        stage_ring_biases = None
         for layer_index, block in enumerate(self.blocks):
             start = layer_index * self.num_heads
             stop = start + self.num_heads
@@ -173,12 +180,25 @@ class DeiTTinyRotHexLook(nn.Module):
                 self.feature_ring_matcher is not None
                 and layer_index >= self.feature_ring_matcher.start_layer
             ):
-                norm1_input = block.norm1(tokens)
-                dense_ring_bias = (
-                    self.feature_ring_matcher.dense_look_bias_from_features(
-                        norm1_input[:, 1:], layer_index=layer_index
+                stage_offset = (
+                    layer_index - self.feature_ring_matcher.start_layer
+                ) % self.feature_ring_group_size
+                if stage_offset == 0:
+                    norm1_input = block.norm1(tokens)
+                    stop_layer = min(
+                        layer_index + self.feature_ring_group_size, self.depth
                     )
-                )
+                    stage_indices = tuple(range(layer_index, stop_layer))
+                    stage_ring_biases = (
+                        self.feature_ring_matcher.dense_look_bias_for_layers(
+                            norm1_input[:, 1:],
+                            layer_indices=stage_indices,
+                            frequency_domain=self.feature_ring_frequency,
+                        )
+                    )
+                if stage_ring_biases is None:
+                    raise RuntimeError("feature-ring stage cache was not initialized")
+                dense_ring_bias = stage_ring_biases[stage_offset]
             else:
                 dense_ring_bias = None
             tokens = block(

@@ -73,7 +73,14 @@ Each layer/head stores six shared `head_dim -> 1` projections in polar
 feature-pair rotation. The resulting local pose evidence rotates one learned
 canonical `4 radius x 12 direction` map: a cheap one-ring detector therefore
 decides which parts of the full four-ring attention field should be emphasized.
-No C12 detector, second feature scale, or short-ring FFT is evaluated.
+No C12 detector or second feature scale is used. To avoid repeating the same
+neighbor gather in every block, layers are divided into stages of four. The
+stage-entry hidden state generates four independent, layer-specific Look fields
+in one batched operation; the later three blocks therefore use routing evidence
+from the start of their stage. A mathematically equivalent C6 frequency-domain
+path is retained as an ablation, but direct batched correlation is the default:
+on the local RTX 4060 training-step benchmark it was slightly faster and used
+less peak memory than the short-ring FFT path.
 
 ## Main experiment configurations
 

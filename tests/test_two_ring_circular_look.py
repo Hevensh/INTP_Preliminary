@@ -7,7 +7,7 @@ from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
 
 
-def _build(variant: str):
+def _build(variant: str, **kwargs):
     return build_imagenet100_model(
         variant=variant,
         model_name="deit_tiny_patch16_224",
@@ -22,6 +22,7 @@ def _build(variant: str):
         look_compact_variable_rings=True,
         rot_prototype_chunk_size=16,
         rot_null_initial_score=0.0,
+        **kwargs,
     )
 
 
@@ -86,6 +87,63 @@ def test_c6_probe_outputs_centered_coefficients_and_gradients():
     ):
         assert gradient is not None
         assert torch.isfinite(gradient).all()
+
+
+def test_four_layer_batch_matches_independent_direct_fields():
+    coordinates = _coordinates()
+    matcher = TwoRingCircularLookMatcher(
+        coordinates=coordinates,
+        depth=4,
+        num_heads=3,
+        head_dim=64,
+        start_layer=0,
+    )
+    with torch.no_grad():
+        matcher.gate.normal_(mean=0.0, std=0.1)
+    features = torch.randn(2, coordinates.shape[0], 192, requires_grad=True)
+    layer_indices = (0, 1, 2, 3)
+    expected = torch.stack(
+        tuple(
+            matcher.dense_look_bias_from_features(features, layer_index=index)
+            for index in layer_indices
+        )
+    )
+    actual = matcher.dense_look_bias_for_layers(
+        features, layer_indices=layer_indices
+    )
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+    actual.square().mean().backward()
+    for gradient in (
+        features.grad,
+        matcher.radius.grad,
+        matcher.phase.grad,
+        matcher.look_grid.grad,
+        matcher.gate.grad,
+    ):
+        assert gradient is not None
+        assert torch.isfinite(gradient).all()
+
+
+def test_frequency_batch_matches_four_layer_direct_fields():
+    coordinates = _coordinates()
+    matcher = TwoRingCircularLookMatcher(
+        coordinates=coordinates,
+        depth=4,
+        num_heads=3,
+        head_dim=64,
+        start_layer=0,
+    )
+    with torch.no_grad():
+        matcher.gate.normal_(mean=0.0, std=0.1)
+    features = torch.randn(1, coordinates.shape[0], 192)
+    layer_indices = (0, 1, 2, 3)
+    direct = matcher.dense_look_bias_for_layers(
+        features, layer_indices=layer_indices, frequency_domain=False
+    )
+    frequency = matcher.dense_look_bias_for_layers(
+        features, layer_indices=layer_indices, frequency_domain=True
+    )
+    torch.testing.assert_close(frequency, direct, rtol=2e-4, atol=2e-4)
 
 
 def test_spatial_and_paired_weight_rotation_are_synchronized():

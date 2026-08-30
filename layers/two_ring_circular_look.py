@@ -234,6 +234,159 @@ class TwoRingCircularLookMatcher(nn.Module):
         scores = scores / torch.sqrt(valid_count[None, :, None, None])
         return scores - scores.mean(dim=-1, keepdim=True)
 
+    def _gather_edges(self, features: torch.Tensor) -> torch.Tensor:
+        batch, patches, heads, channels = features.shape
+        sentinel = patches
+        padded = torch.cat(
+            (features, features.new_zeros(batch, 1, heads, channels)), dim=1
+        )
+        gather_index = torch.where(
+            self.valid,
+            self.neighbors.clamp_min(0),
+            torch.full_like(self.neighbors, sentinel),
+        )
+        return padded[:, gather_index]
+
+    def _render_layer_weights(
+        self,
+        radius: torch.Tensor,
+        phase: torch.Tensor,
+    ) -> torch.Tensor:
+        """Render L independent C6 banks together as (L,H,T,P,C)."""
+
+        base_x = radius * phase.cos()
+        base_y = radius * phase.sin()
+        selected_x = base_x[:, :, self.relative, :]
+        selected_y = base_y[:, :, self.relative, :]
+        cosine = self.candidate_angle.cos()[None, None, :, None, None]
+        sine = self.candidate_angle.sin()[None, None, :, None, None]
+        paired = torch.stack(
+            (
+                selected_x * cosine - selected_y * sine,
+                selected_x * sine + selected_y * cosine,
+            ),
+            dim=-1,
+        )
+        return paired.flatten(-2)
+
+    def _direct_layer_scores(
+        self,
+        features: torch.Tensor,
+        active_layers: torch.Tensor,
+    ) -> torch.Tensor:
+        edge = self._gather_edges(features)
+        weight = self._render_layer_weights(
+            self.radius[active_layers], self.phase[active_layers]
+        )
+        scores = torch.einsum("bqphc,lhtpc->lbqht", edge, weight)
+        valid_count = self.valid.sum(dim=-1).clamp_min(1).to(scores.dtype)
+        scores = scores / torch.sqrt(valid_count[None, None, :, None, None])
+        scores = scores - scores.mean(dim=-1, keepdim=True)
+        return scores * self.gate[active_layers, :, None][
+            :, None, None
+        ]
+
+    def _frequency_layer_query_grids(
+        self,
+        features: torch.Tensor,
+        active_layers: torch.Tensor,
+    ) -> torch.Tensor:
+        """Batch C6 correlation and four-ring steering in one spectral chain."""
+
+        edge = self._gather_edges(features)
+        batch, patches, directions, heads, channels = edge.shape
+        edge_pairs = edge.reshape(
+            batch, patches, directions, heads, channels // 2, 2
+        ).float()
+        edge_spectrum = torch.fft.fft(
+            torch.view_as_complex(edge_pairs.contiguous()), dim=2
+        )
+        weight = torch.polar(
+            self.radius[active_layers].float(),
+            self.phase[active_layers].float(),
+        )
+        weight_spectrum = torch.fft.fft(weight.conj(), dim=2)
+        correlation = (
+            edge_spectrum[None]
+            * weight_spectrum.permute(0, 2, 1, 3)[:, None, None]
+        ).sum(dim=-1).permute(0, 1, 2, 4, 3)
+        frequency = torch.arange(6, device=features.device)
+        score_spectrum = 0.5 * (
+            correlation[..., (frequency + 1) % 6]
+            + correlation[..., (1 - frequency) % 6].conj()
+        )
+        keep_non_dc = score_spectrum.real.new_ones(6)
+        keep_non_dc[0] = 0.0
+        score_spectrum = score_spectrum * keep_non_dc
+        valid_count = self.valid.sum(dim=-1).clamp_min(1).to(
+            score_spectrum.real.dtype
+        )
+        score_spectrum = score_spectrum / torch.sqrt(
+            valid_count[None, None, :, None, None]
+        )
+        score_spectrum = score_spectrum * self.gate[
+            active_layers, :, None
+        ][:, None, None]
+        lifted = torch.cat((score_spectrum, score_spectrum), dim=-1)
+        grid_spectrum = torch.fft.fft(
+            self.look_grid[active_layers].float(), dim=-1
+        )
+        return torch.fft.ifft(
+            lifted.unsqueeze(-2) * grid_spectrum[:, None, None],
+            dim=-1,
+        ).real
+
+    def _sample_layer_grids(self, query_grids: torch.Tensor) -> torch.Tensor:
+        layers, batch, patches, heads, radial, angular = query_grids.shape
+        flat = query_grids.reshape(
+            layers * batch, patches, heads, radial, angular
+        )
+        dense = self._sample_query_grids(flat)
+        return dense.reshape(
+            layers, batch, heads, self.num_patches, self.num_patches
+        )
+
+    def dense_look_bias_for_layers(
+        self,
+        patch_features: torch.Tensor,
+        *,
+        layer_indices: tuple[int, ...],
+        frequency_domain: bool = False,
+    ) -> torch.Tensor:
+        """Generate independent Look fields for one layer stage in one batch."""
+
+        if not layer_indices:
+            raise ValueError("layer_indices cannot be empty")
+        features, _ = self._validate_features(patch_features, layer_indices[0])
+        if any(
+            index < self.start_layer or index >= self.depth
+            for index in layer_indices
+        ):
+            raise ValueError("layer_indices are outside the active matcher range")
+        active_layers = torch.tensor(
+            [index - self.start_layer for index in layer_indices],
+            device=patch_features.device,
+            dtype=torch.long,
+        )
+        if frequency_domain:
+            query_grids = self._frequency_layer_query_grids(
+                features, active_layers
+            )
+        else:
+            scores = self._direct_layer_scores(features, active_layers)
+            grids = self.look_grid[active_layers]
+            rotated = torch.stack(
+                tuple(
+                    torch.roll(grids, shifts=direction * 2, dims=-1)
+                    for direction in range(6)
+                ),
+                dim=2,
+            )
+            query_grids = torch.einsum(
+                "lbqhd,lhdrt->lbqhrt", scores, rotated
+            )
+        return self._sample_layer_grids(query_grids)
+
     def _validate_features(
         self, patch_features: torch.Tensor, layer_index: int
     ) -> tuple[torch.Tensor, int]:

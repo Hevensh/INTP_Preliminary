@@ -67,6 +67,8 @@ class TrainConfig:
     look_compact_variable_rings: bool = False
     feature_ring_look: bool = False
     feature_ring_start_layer: int = 0
+    feature_ring_group_size: int = 4
+    feature_ring_frequency: bool = False
     rot_prototype_chunk_size: int = 16
     rot_use_null: bool = True
     rot_null_initial_score: float = -1.0
@@ -549,6 +551,8 @@ def main() -> None:
         look_compact_variable_rings=config.look_compact_variable_rings,
         feature_ring_look=config.feature_ring_look,
         feature_ring_start_layer=config.feature_ring_start_layer,
+        feature_ring_group_size=config.feature_ring_group_size,
+        feature_ring_frequency=config.feature_ring_frequency,
         rot_prototype_chunk_size=config.rot_prototype_chunk_size,
         rot_use_null=config.rot_use_null,
         rot_null_initial_score=config.rot_null_initial_score,
