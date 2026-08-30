@@ -96,10 +96,13 @@ less peak memory than the short-ring FFT path.
 The configuration names describe discrete research settings; they do not imply
 continuous group equivariance.
 
-The experimental ResNet branch also includes a stage-routed variant. It keeps
-the standard ResNet-18 BasicBlocks intact and computes one coarse, large-support
-MAMS route at each stage entrance. The two blocks in a stage share the costly
-pose/scale matching probabilities but retain independent A/B/Vscale values.
+The experimental ResNet branch also includes a stage-routed replacement. It
+removes the first `3x3` convolution from every ResNet-18 BasicBlock and computes
+one coarse, large-support MAMS route at each stage entrance. Same-resolution
+blocks use their input as the residual-branch seed; transition blocks reuse the
+existing shortcut projection, so no replacement input-side `1x1` is added. The
+two blocks in a stage share the costly pose/scale matching probabilities but
+retain independent low-rank A/B/Vscale values.
 Routes are generated at `14x14, 14x14, 14x14, 7x7` and interpolated onto the
 stage feature grid; this avoids applying a large dynamic kernel densely at all
 early-stage positions. The four stage supports are respectively `9/5`, `9/5`,

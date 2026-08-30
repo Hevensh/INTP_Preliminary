@@ -244,11 +244,27 @@ def test_resnet18_stage_mams_keeps_standard_blocks_and_large_stage_routes():
     assert all(stage.router.consumers == 2 for stage in stages)
     assert all(stage.router.route_channels == 32 for stage in stages)
     assert [stage.router.stride for stage in stages] == [4, 4, 2, 2]
+    assert all(
+        isinstance(block.conv1, torch.nn.Identity)
+        for stage in stages
+        for block in stage.blocks
+    )
+    assert not any(
+        isinstance(module, torch.nn.Conv2d) and module.kernel_size == (1, 1)
+        for stage in stages
+        for module in stage.modules()
+        if module not in [
+            block.downsample[0]
+            for block in stage.blocks
+            if block.downsample is not None
+        ]
+    )
     parameters = sum(parameter.numel() for parameter in model.parameters())
     baseline_parameters = sum(
         parameter.numel() for parameter in baseline.parameters()
     )
-    assert baseline_parameters < parameters < baseline_parameters * 1.1
+    assert 6_700_000 < parameters < 6_800_000
+    assert parameters < baseline_parameters
 
     model.eval()
     with torch.inference_mode():

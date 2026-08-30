@@ -18,7 +18,7 @@ if [[ -f "${RUN_DIR}/last.pt" ]]; then
   RESUME_ARGS=(--resume "${RUN_DIR}/last.pt")
 fi
 
-echo "[run] Stage-MAMS ResNet-18 | shared large route + block-specific values | half4d4r | ${EPOCHS} epochs | batch ${BATCH_SIZE}/GPU"
+echo "[run] Stage-MAMS ResNet-18 | replace first 3x3 with shared large route | half4d4r | ${EPOCHS} epochs | batch ${BATCH_SIZE}/GPU"
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
   -m experiments.imagenet100.train_vit \
   --config configs/imagenet100/resnet18_stage_mams_large_4d4r_ddp_e20.json \

@@ -252,32 +252,42 @@ class StageRoutedMAMS(nn.Module):
             prototype_chunk_size=prototype_chunk_size,
             null_initial_score=null_initial_score,
         )
-        self.projections = nn.ModuleList(
-            nn.Identity()
-            if route_channels == out_channels
-            else nn.Conv2d(route_channels, out_channels, kernel_size=1, bias=False)
-            for _ in blocks
+        # This is the low-rank value factor attached to each block, not an
+        # input-side 1x1 convolution. It is evaluated on the coarse control
+        # field before interpolation and is algebraically part of V(r,theta).
+        self.value_projection = nn.Parameter(
+            torch.empty(len(blocks), out_channels, route_channels)
         )
+        nn.init.kaiming_normal_(self.value_projection, nonlinearity="linear")
         self.gate = nn.Parameter(torch.full((len(blocks), out_channels), 0.1))
         self.relu = nn.ReLU(inplace=False)
+        # The first 3x3 of every BasicBlock is replaced by the stage route.
+        # Removing the module also removes its parameters from the model.
+        for block in self.blocks:
+            block.conv1 = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         routed = self.router(x)
         out = x
-        for index, (block, projection) in enumerate(
-            zip(self.blocks, self.projections, strict=True)
-        ):
-            out = block(out)
-            correction = projection(routed[index])
+        for index, block in enumerate(self.blocks):
+            identity = out
+            if block.downsample is not None:
+                identity = block.downsample(out)
+            correction = F.linear(
+                routed[index].permute(0, 2, 3, 1),
+                self.value_projection[index].to(routed.dtype),
+            ).permute(0, 3, 1, 2)
             if correction.shape[-2:] != out.shape[-2:]:
                 correction = F.interpolate(
                     correction,
-                    size=out.shape[-2:],
+                    size=identity.shape[-2:],
                     mode="bilinear",
                     align_corners=False,
                 )
             gate = self.gate[index][None, :, None, None].to(correction.dtype)
-            out = self.relu(out + correction * gate)
+            branch = self.relu(block.bn1(identity + correction * gate))
+            branch = block.bn2(block.conv2(branch))
+            out = self.relu(branch + identity)
         return out
 
 
