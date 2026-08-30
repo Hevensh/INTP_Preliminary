@@ -22,6 +22,7 @@ from model.resnet_mams import (
     build_resnet18_mams,
     build_resnet18_mams_fourv_paired,
     build_resnet18_stage_mams,
+    build_resnet18_stage_mams_additive,
 )
 
 
@@ -31,6 +32,7 @@ MODEL_VARIANTS = {
     "resnet18_mixconv4", "resnet18_fixed_rotinterp8", "resnet18_arc4bank",
     "resnet18_mams_fourv_paired",
     "resnet18_stage_mams",
+    "resnet18_stage_mams_additive",
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
@@ -137,10 +139,15 @@ def build_imagenet100_model(
             prototype_chunk_size=rot_prototype_chunk_size,
             null_initial_score=rot_null_initial_score,
         )
-    if variant == "resnet18_stage_mams":
+    if variant in {"resnet18_stage_mams", "resnet18_stage_mams_additive"}:
         if pretrained:
             raise ValueError("the stage-routed MAMS comparison is trained from scratch")
-        return build_resnet18_stage_mams(
+        builder = (
+            build_resnet18_stage_mams_additive
+            if variant == "resnet18_stage_mams_additive"
+            else build_resnet18_stage_mams
+        )
+        return builder(
             num_classes=num_classes,
             directions=rot_directions,
             global_directions=rot_global_directions,

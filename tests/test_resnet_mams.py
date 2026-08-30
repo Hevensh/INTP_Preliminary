@@ -7,7 +7,7 @@ from layers.cartesian_rotating_harmonic_conv import (
 )
 from model.resnet_mams import MAMSBasicBlock
 from model.resnet_mams import FourValuePairedMAMSBasicBlock
-from model.resnet_mams import StageRoutedMAMS
+from model.resnet_mams import AdditiveStageRoutedMAMS, StageRoutedMAMS
 from layers.cartesian_four_value_paired_mams import (
     CartesianFourValuePairedMAMSConv2d,
     ComplexPointwiseConv2d,
@@ -265,6 +265,47 @@ def test_resnet18_stage_mams_keeps_standard_blocks_and_large_stage_routes():
     )
     assert 6_700_000 < parameters < 6_800_000
     assert parameters < baseline_parameters
+
+    model.eval()
+    with torch.inference_mode():
+        output = model(torch.randn(1, 3, 32, 32))
+    assert output.shape == (1, 100)
+    assert torch.isfinite(output).all()
+
+
+def test_additive_stage_mams_preserves_both_three_by_three_convolutions():
+    baseline = build_imagenet100_model(
+        variant="resnet18",
+        model_name="resnet18",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+    )
+    model = build_imagenet100_model(
+        variant="resnet18_stage_mams_additive",
+        model_name="resnet18_stage_mams_additive_large_4d4r",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+        rot_directions=4,
+        rot_global_directions=8,
+        rot_angular_bins_per_radius=4,
+        rot_prototype_chunk_size=16,
+        rot_null_initial_score=0.0,
+    )
+    stages = [model.layer1, model.layer2, model.layer3, model.layer4]
+    assert all(isinstance(stage, AdditiveStageRoutedMAMS) for stage in stages)
+    assert all(
+        isinstance(block.conv1, torch.nn.Conv2d)
+        and block.conv1.kernel_size == (3, 3)
+        and isinstance(block.conv2, torch.nn.Conv2d)
+        and block.conv2.kernel_size == (3, 3)
+        for stage in stages
+        for block in stage.blocks
+    )
+    parameters = sum(parameter.numel() for parameter in model.parameters())
+    baseline_parameters = sum(parameter.numel() for parameter in baseline.parameters())
+    assert parameters > baseline_parameters
 
     model.eval()
     with torch.inference_mode():

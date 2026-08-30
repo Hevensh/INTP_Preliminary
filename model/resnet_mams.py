@@ -291,6 +291,86 @@ class StageRoutedMAMS(nn.Module):
         return out
 
 
+class AdditiveStageRoutedMAMS(nn.Module):
+    """Keep both 3x3 convolutions and add the shared route before BN1.
+
+    This is the controlled counterpart of :class:`StageRoutedMAMS`: routing,
+    route resolution, low-rank consumer values, and gates are identical, but
+    the first 3x3 convolution is retained.  A zero route therefore recovers an
+    ordinary torchvision BasicBlock exactly.
+    """
+
+    def __init__(
+        self,
+        stage: nn.Sequential,
+        *,
+        diameters: tuple[int, ...],
+        directions: int,
+        global_directions: int,
+        angular_bins_per_radius: int,
+        prototype_chunk_size: int,
+        null_initial_score: float,
+        route_channels: int = 32,
+        route_stride: int | None = None,
+    ) -> None:
+        super().__init__()
+        blocks = list(stage.children())
+        if not blocks:
+            raise ValueError("an additive routed ResNet stage cannot be empty")
+        self.blocks = nn.ModuleList(blocks)
+        in_channels = blocks[0].conv1.in_channels
+        out_channels = blocks[0].conv2.out_channels
+        stride = blocks[0].stride
+        if route_stride is None:
+            route_stride = stride
+        self.router = CartesianStageMAMSRouting2d(
+            in_channels,
+            route_channels,
+            consumers=len(blocks),
+            diameters=diameters,
+            stride=route_stride,
+            directions=directions,
+            global_directions=global_directions,
+            angular_bins_per_radius=angular_bins_per_radius,
+            prototype_chunk_size=prototype_chunk_size,
+            null_initial_score=null_initial_score,
+        )
+        self.value_projection = nn.Parameter(
+            torch.empty(len(blocks), out_channels, route_channels)
+        )
+        nn.init.kaiming_normal_(self.value_projection, nonlinearity="linear")
+        self.gate = nn.Parameter(torch.full((len(blocks), out_channels), 0.1))
+        self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        routed = self.router(x)
+        out = x
+        for index, block in enumerate(self.blocks):
+            identity = out
+            if block.downsample is not None:
+                identity = block.downsample(out)
+
+            # Preserve the original first 3x3 and inject geometry at exactly
+            # the location occupied by the replacement experiment.
+            branch = block.conv1(out)
+            correction = F.linear(
+                routed[index].permute(0, 2, 3, 1),
+                self.value_projection[index].to(routed.dtype),
+            ).permute(0, 3, 1, 2)
+            if correction.shape[-2:] != branch.shape[-2:]:
+                correction = F.interpolate(
+                    correction,
+                    size=branch.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            gate = self.gate[index][None, :, None, None].to(correction.dtype)
+            branch = self.relu(block.bn1(branch + correction * gate))
+            branch = block.bn2(block.conv2(branch))
+            out = self.relu(branch + identity)
+        return out
+
+
 def build_resnet18_stage_mams(
     *,
     num_classes: int,
@@ -319,6 +399,48 @@ def build_resnet18_stage_mams(
             model,
             stage_name,
             StageRoutedMAMS(
+                getattr(model, stage_name),
+                diameters=diameters,
+                directions=directions,
+                global_directions=global_directions,
+                angular_bins_per_radius=angular_bins_per_radius,
+                prototype_chunk_size=prototype_chunk_size,
+                null_initial_score=null_initial_score,
+                route_channels=route_channels,
+                route_stride=route_strides[index - 1],
+            ),
+        )
+    return model
+
+
+def build_resnet18_stage_mams_additive(
+    *,
+    num_classes: int,
+    stage_diameters: tuple[tuple[int, ...], ...] = (
+        (9, 5),
+        (9, 5),
+        (7, 3),
+        (5, 3),
+    ),
+    route_strides: tuple[int, ...] = (4, 4, 2, 2),
+    directions: int = 4,
+    global_directions: int = 8,
+    angular_bins_per_radius: int = 4,
+    prototype_chunk_size: int = 16,
+    null_initial_score: float = 0.0,
+    route_channels: int = 32,
+) -> nn.Module:
+    """Augment every ResNet-18 stage without deleting either 3x3 conv."""
+
+    if len(stage_diameters) != 4 or len(route_strides) != 4:
+        raise ValueError("ResNet-18 requires four stage geometry specifications")
+    model = resnet18(weights=None, num_classes=num_classes)
+    for index, diameters in enumerate(stage_diameters, start=1):
+        stage_name = f"layer{index}"
+        setattr(
+            model,
+            stage_name,
+            AdditiveStageRoutedMAMS(
                 getattr(model, stage_name),
                 diameters=diameters,
                 directions=directions,
