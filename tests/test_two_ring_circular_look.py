@@ -83,13 +83,17 @@ def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
     assert inner.shape == (2, coordinates.shape[0], 3, 6)
     assert outer.shape == (2, coordinates.shape[0], 3, 12)
     dense_bias = matcher.dense_look_bias(inner, outer, layer_index=0)
+    combined_bias = matcher.dense_look_bias_from_features(
+        features, layer_index=0
+    )
     assert dense_bias.shape == (
         2, 3, coordinates.shape[0], coordinates.shape[0]
     )
+    torch.testing.assert_close(combined_bias, dense_bias, rtol=2e-5, atol=2e-5)
     torch.testing.assert_close(inner.mean(dim=-1), torch.zeros_like(inner[..., 0]))
     torch.testing.assert_close(outer.mean(dim=-1), torch.zeros_like(outer[..., 0]))
     loss = inner.square().mean() + outer.square().mean()
-    loss = loss + dense_bias.square().mean()
+    loss = loss + combined_bias.square().mean()
     loss.backward()
     assert torch.isfinite(features.grad).all()
     assert torch.isfinite(matcher.inner_radius.grad).all()
@@ -97,6 +101,68 @@ def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
     assert torch.isfinite(matcher.outer_radius.grad).all()
     assert torch.isfinite(matcher.outer_phase.grad).all()
     assert torch.isfinite(matcher.look_grid.grad).all()
+
+
+def test_frequency_ring_correlation_matches_explicit_rotated_banks():
+    base = _build("rot_hex_harmonic_pe_look")
+    coordinates = torch.stack(
+        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
+    )
+    matcher = TwoRingCircularLookMatcher(
+        coordinates=coordinates,
+        depth=1,
+        num_heads=3,
+        head_dim=64,
+        start_layer=0,
+    )
+    with torch.no_grad():
+        matcher.gate.fill_(1.0)
+    features = torch.randn(2, coordinates.shape[0], 192)
+    actual_inner, actual_outer = matcher(features, layer_index=0)
+    heads = features.reshape(2, coordinates.shape[0], 3, 64)
+
+    def explicit(
+        neighbors,
+        valid,
+        radius,
+        phase,
+        relative,
+        candidate_angle,
+    ):
+        sentinel = coordinates.shape[0]
+        padded = torch.cat((heads, heads.new_zeros(2, 1, 3, 64)), dim=1)
+        indices = torch.where(
+            valid,
+            neighbors.clamp_min(0),
+            torch.full_like(neighbors, sentinel),
+        )
+        edge = padded[:, indices]
+        weight = matcher._render_polar_weight(
+            radius, phase, relative, candidate_angle
+        )
+        score = torch.einsum("bqphc,htpc->bqht", edge, weight)
+        count = valid.sum(dim=-1).clamp_min(1).to(score.dtype)
+        score = score / torch.sqrt(count[None, :, None, None])
+        return score - score.mean(dim=-1, keepdim=True)
+
+    expected_inner = explicit(
+        matcher.inner_neighbors,
+        matcher.inner_valid,
+        matcher.inner_radius[0],
+        matcher.inner_phase[0],
+        matcher.inner_relative,
+        matcher.inner_candidate_angle,
+    )
+    expected_outer = explicit(
+        matcher.outer_neighbors,
+        matcher.outer_valid,
+        matcher.outer_radius[0],
+        matcher.outer_phase[0],
+        matcher.outer_relative,
+        matcher.outer_candidate_angle,
+    )
+    torch.testing.assert_close(actual_inner, expected_inner, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(actual_outer, expected_outer, rtol=2e-5, atol=2e-5)
 
 
 def test_spatial_and_paired_weight_rotation_are_synchronized():

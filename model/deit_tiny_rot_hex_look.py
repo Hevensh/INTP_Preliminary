@@ -174,11 +174,10 @@ class DeiTTinyRotHexLook(nn.Module):
                 and layer_index >= self.feature_ring_matcher.start_layer
             ):
                 norm1_input = block.norm1(tokens)
-                inner, outer = self.feature_ring_matcher(
-                    norm1_input[:, 1:], layer_index=layer_index
-                )
-                dense_ring_bias = self.feature_ring_matcher.dense_look_bias(
-                    inner, outer, layer_index=layer_index
+                dense_ring_bias = (
+                    self.feature_ring_matcher.dense_look_bias_from_features(
+                        norm1_input[:, 1:], layer_index=layer_index
+                    )
                 )
             else:
                 dense_ring_bias = None

@@ -77,7 +77,9 @@ the same angle to its feature-pair phases; each position still owns exactly
 `4 radius x 12 direction` dense Look map, matching the image-derived path: C6
 uses its small-scale transform and C12 uses its large-scale transform. The map
 rotates with the detected pose and is appended to the original image-derived
-Look terms; the implementation still avoids repeating pose-field sampling.
+Look terms. Ring rotation is evaluated as exact complex circular correlation;
+its spectrum is multiplied directly by the canonical Look spectrum, avoiding
+explicit rotated banks and the pose-space IFFT-to-FFT round trip.
 
 ## Main experiment configurations
 

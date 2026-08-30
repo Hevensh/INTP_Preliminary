@@ -231,17 +231,18 @@ class TwoRingCircularLookMatcher(nn.Module):
         )
         return paired.flatten(-2)
 
-    def _correlate(
+    def _correlation_spectrum(
         self,
         features: torch.Tensor,
         neighbors: torch.Tensor,
         valid: torch.Tensor,
         radius: torch.Tensor,
         phase: torch.Tensor,
-        relative: torch.Tensor,
-        candidate_angle: torch.Tensor,
     ) -> torch.Tensor:
+        """Return the DFT of every centered synchronized ring response."""
+
         batch, patches, heads, channels = features.shape
+        directions = neighbors.shape[1]
         sentinel = patches
         padded = torch.cat(
             (features, features.new_zeros(batch, 1, heads, channels)), dim=1
@@ -252,24 +253,96 @@ class TwoRingCircularLookMatcher(nn.Module):
         )
         edge = padded[:, gather_index]
 
-        # Each stored W_look is a head_dim -> 1 projection.  Its circular
-        # relative index is shared by every absolute candidate orientation.
-        circular_weight = self._render_polar_weight(
-            radius, phase, relative, candidate_angle
-        )
-        scores = torch.einsum("bqphc,htpc->bqht", edge, circular_weight)
-        valid_count = valid.sum(dim=-1).clamp_min(1).to(scores.dtype)
-        scores = scores / torch.sqrt(valid_count[None, :, None, None])
-        return scores - scores.mean(dim=-1, keepdim=True)
+        # Interpret each adjacent feature pair as one complex coefficient.
+        # All candidate directions are then one circular correlation along the
+        # spatial ring, followed by the synchronized feature-pair rotation.
+        # This is exactly equivalent to explicitly rendering N rotated banks
+        # and evaluating an N x N position-pose table.
+        edge_pairs = edge.reshape(
+            batch, patches, neighbors.shape[1], heads, channels // 2, 2
+        ).float()
+        edge_complex = torch.view_as_complex(edge_pairs.contiguous())
+        weight_complex = torch.polar(radius.float(), phase.float())
+        edge_spectrum = torch.fft.fft(edge_complex, dim=2)
+        # relative[t, p] = t - p, so this is circular convolution with
+        # conj(weight), not the more common lag-correlation convention.
+        weight_spectrum = torch.fft.fft(weight_complex.conj(), dim=1)
+        correlation_spectrum = (
+            edge_spectrum
+            * weight_spectrum.permute(1, 0, 2)[None, None]
+        ).sum(dim=-1).permute(0, 1, 3, 2)
 
-    def forward(
+        # Multiplication by exp(-i*theta_t) in pose space shifts the DFT by
+        # one bin. Taking the real part then adds its conjugate reflection:
+        # S[k] = 1/2 * (C[k+1] + conj(C[1-k])). This avoids an IFFT followed
+        # immediately by another FFT in the Look-grid convolution.
+        frequency = torch.arange(
+            directions, device=features.device, dtype=torch.long
+        )
+        positive = (frequency + 1) % directions
+        reflected = (1 - frequency) % directions
+        score_spectrum = 0.5 * (
+            correlation_spectrum[..., positive]
+            + correlation_spectrum[..., reflected].conj()
+        )
+        # Centering in pose space is exactly removal of the DC coefficient.
+        keep_non_dc = torch.ones(
+            directions,
+            device=features.device,
+            dtype=score_spectrum.real.dtype,
+        )
+        keep_non_dc[0] = 0.0
+        score_spectrum = score_spectrum * keep_non_dc
+        valid_count = valid.sum(dim=-1).clamp_min(1).to(score_spectrum.real.dtype)
+        return score_spectrum / torch.sqrt(valid_count[None, :, None, None])
+
+    def _correlate(
+        self,
+        features: torch.Tensor,
+        neighbors: torch.Tensor,
+        valid: torch.Tensor,
+        radius: torch.Tensor,
+        phase: torch.Tensor,
+        relative: torch.Tensor,
+        candidate_angle: torch.Tensor,
+    ) -> torch.Tensor:
+        del relative, candidate_angle
+        spectrum = self._correlation_spectrum(
+            features, neighbors, valid, radius, phase
+        )
+        return torch.fft.ifft(spectrum, dim=-1).real
+
+    @staticmethod
+    def _angular_circular_convolution(
+        scores: torch.Tensor,
+        grid_spectrum: torch.Tensor,
+        *,
+        angular_stride: int,
+        angular_bins: int = 12,
+    ) -> torch.Tensor:
+        """Convolve pose responses with one canonical angular Look table."""
+
+        directions = scores.shape[-1]
+        indices = torch.arange(
+            directions, device=scores.device, dtype=torch.long
+        ) * angular_stride
+        lifted = scores.new_zeros(*scores.shape[:-1], angular_bins)
+        lifted = lifted.index_copy(-1, indices, scores)
+        score_spectrum = torch.fft.rfft(lifted.float(), dim=-1)
+        query_spectrum = (
+            score_spectrum.unsqueeze(-2)
+            * grid_spectrum[None, None]
+        )
+        return torch.fft.irfft(
+            query_spectrum, n=angular_bins, dim=-1
+        )
+
+    def _ring_spectra(
         self,
         patch_features: torch.Tensor,
         *,
         layer_index: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return centered gated inner C6 and outer C12 coefficients."""
-
         if patch_features.ndim != 3:
             raise ValueError("patch_features must have shape (B, N, D)")
         if patch_features.shape[1] != self.num_patches:
@@ -285,28 +358,87 @@ class TwoRingCircularLookMatcher(nn.Module):
         features = patch_features.reshape(
             patch_features.shape[0], self.num_patches, self.num_heads, self.head_dim
         )
-        inner = self._correlate(
+        inner = self._correlation_spectrum(
             features,
             self.inner_neighbors,
             self.inner_valid,
             self.inner_radius[active_layer],
             self.inner_phase[active_layer],
-            self.inner_relative,
-            self.inner_candidate_angle,
         )
-        outer = self._correlate(
+        outer = self._correlation_spectrum(
             features,
             self.outer_neighbors,
             self.outer_valid,
             self.outer_radius[active_layer],
             self.outer_phase[active_layer],
-            self.outer_relative,
-            self.outer_candidate_angle,
         )
         gate = self.gate[active_layer]
         inner = inner * gate[None, None, :, 0, None]
         outer = outer * gate[None, None, :, 1, None]
         return inner, outer
+
+    def forward(
+        self,
+        patch_features: torch.Tensor,
+        *,
+        layer_index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return centered gated inner C6 and outer C12 coefficients."""
+
+        inner, outer = self._ring_spectra(
+            patch_features, layer_index=layer_index
+        )
+        return (
+            torch.fft.ifft(inner, dim=-1).real,
+            torch.fft.ifft(outer, dim=-1).real,
+        )
+
+    def _spectral_query_grids(
+        self,
+        inner_spectrum: torch.Tensor,
+        outer_spectrum: torch.Tensor,
+        *,
+        active_layer: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        grid_spectrum = torch.fft.fft(
+            self.look_grid[active_layer].float(), dim=-1
+        )
+        # Inserting the six inner responses into angular bins 0,2,...,10
+        # repeats their six-point DFT twice over the twelve-bin spectrum.
+        inner_lifted_spectrum = torch.cat(
+            (inner_spectrum, inner_spectrum), dim=-1
+        )
+        inner_query_grid = torch.fft.ifft(
+            inner_lifted_spectrum.unsqueeze(-2)
+            * grid_spectrum[None, None],
+            dim=-1,
+        ).real
+        outer_query_grid = torch.fft.ifft(
+            outer_spectrum.unsqueeze(-2) * grid_spectrum[None, None],
+            dim=-1,
+        ).real
+        return inner_query_grid, outer_query_grid
+
+    def dense_look_bias_from_features(
+        self,
+        patch_features: torch.Tensor,
+        *,
+        layer_index: int,
+    ) -> torch.Tensor:
+        """Match both rings and render both Look scales without pose round trips."""
+
+        active_layer = layer_index - self.start_layer
+        inner_spectrum, outer_spectrum = self._ring_spectra(
+            patch_features, layer_index=layer_index
+        )
+        inner_query_grid, outer_query_grid = self._spectral_query_grids(
+            inner_spectrum,
+            outer_spectrum,
+            active_layer=active_layer,
+        )
+        return self._sample_query_grids(
+            inner_query_grid, scale_index=1
+        ) + self._sample_query_grids(outer_query_grid, scale_index=0)
 
     def dense_look_bias(
         self,
@@ -320,21 +452,16 @@ class TwoRingCircularLookMatcher(nn.Module):
         if not 0 <= active_layer < self.active_depth:
             raise ValueError("layer_index is outside the active matcher range")
         canonical_grid = self.look_grid[active_layer]
-        inner_grid = self._rotated_look_grids(
-            canonical_grid,
-            directions=6,
+        grid_spectrum = torch.fft.rfft(canonical_grid.float(), dim=-1)
+        inner_query_grid = self._angular_circular_convolution(
+            inner,
+            grid_spectrum,
             angular_stride=2,
         )
-        outer_grid = self._rotated_look_grids(
-            canonical_grid,
-            directions=12,
+        outer_query_grid = self._angular_circular_convolution(
+            outer,
+            grid_spectrum,
             angular_stride=1,
-        )
-        inner_query_grid = torch.einsum(
-            "bqhd,hdrt->bqhrt", inner, inner_grid
-        )
-        outer_query_grid = torch.einsum(
-            "bqhd,hdrt->bqhrt", outer, outer_grid
         )
         # Inner C6 is the small scale; outer C12 is the large scale.
         return self._sample_query_grids(
