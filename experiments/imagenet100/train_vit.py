@@ -736,6 +736,10 @@ def main() -> None:
         "history": history,
         **model_summary,
     }
+    if hasattr(raw_model, "experiment_diagnostics"):
+        diagnostics = raw_model.experiment_diagnostics()
+        if diagnostics:
+            summary["model_diagnostics"] = diagnostics
     if device.type == "cuda":
         summary.update(
             {

@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
+from layers.center_pose_angular_look import CenterPoseAngularLook
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
@@ -32,6 +33,7 @@ class DeiTTinyRotHexLook(nn.Module):
         global_directions: int = 8,
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
+        center_pose_look: bool = False,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
         feature_ring_group_size: int = 4,
@@ -90,13 +92,16 @@ class DeiTTinyRotHexLook(nn.Module):
 
         coo = self.patch_embed.coo_patchs
         patch_coordinates = torch.stack((coo.real, coo.imag), dim=-1)
+        self.center_pose_look = bool(center_pose_look)
+        if self.center_pose_look and feature_ring_look:
+            raise ValueError("center-pose Look and feature-ring Look are exclusive")
         # Keep the Look lattice structurally coupled to the tokenizer instead
         # of silently retaining an 8 x 4 field when the geometric pose search
         # changes.  A half-6 / full-12 tokenizer therefore uses 12 x 4, while
         # the established half-4 / full-8 tokenizer remains 8 x 4.
         self.look_direction_bins = int(global_directions)
         self.look_radial_bins = 2 * len(kernel_sizes)
-        self.look_bank = SquarePatchDenseGridLook(
+        self.look_bank = None if self.center_pose_look else SquarePatchDenseGridLook(
             image_size=image_size,
             patch_size=16,
             in_channels=3,
@@ -125,6 +130,18 @@ class DeiTTinyRotHexLook(nn.Module):
                 lattice_stride if look_compact_variable_rings else None
             ),
         )
+        if self.center_pose_look:
+            self.center_look = CenterPoseAngularLook(
+                coordinates=patch_coordinates,
+                embed_dim=self.embed_dim,
+                num_heads=self.num_heads,
+                depth=self.depth,
+                axes=directions,
+                null_initial_score=tokenizer_null_initial_score,
+                gate_init=0.0,
+            )
+        else:
+            self.center_look = None
         self.feature_ring_look = bool(feature_ring_look)
         if feature_ring_group_size <= 0:
             raise ValueError("feature_ring_group_size must be positive")
@@ -147,6 +164,14 @@ class DeiTTinyRotHexLook(nn.Module):
 
     def forward_features(self, image: torch.Tensor) -> torch.Tensor:
         tokens = self.patch_embed(image)
+        if self.center_look is not None:
+            # Remove the ordinary output bias before interpreting adjacent
+            # dimensions as geometric cosine/sine pairs.
+            shared_pose = self.center_look.pose_weights(
+                tokens - self.patch_embed.output_bias
+            )
+        else:
+            shared_pose = None
         cls = self.cls_token.expand(tokens.shape[0], -1, -1)
         tokens = torch.cat((cls, tokens), dim=1)
         if self.pos_embed is not None:
@@ -155,26 +180,35 @@ class DeiTTinyRotHexLook(nn.Module):
 
         # The image-to-ring preprocessing is intentionally immutable. Look
         # prototypes and grids remain trainable, while P0 is shared once.
-        with torch.autocast(device_type=image.device.type, enabled=False):
-            rings, coverage = self.look_bank.extract_rings(
-                image.float(), track_input_grad=False
-            )
-            fields = self.look_bank.transformed_look_grids()
-            if not self.look_bank.compact_variable_rings:
-                # Preserve the established dense-ring baseline exactly.
+        if self.look_bank is not None:
+            with torch.autocast(device_type=image.device.type, enabled=False):
+                rings, coverage = self.look_bank.extract_rings(
+                    image.float(), track_input_grad=False
+                )
+                fields = self.look_bank.transformed_look_grids()
+                if not self.look_bank.compact_variable_rings:
+                    # Preserve the established dense-ring baseline exactly.
+                    pose_weights = self.look_bank.pose_weights(rings, coverage)
+            if self.look_bank.compact_variable_rings:
+                # Restore the caller's AMP context for the large K24/K12 GEMMs.
+                # pose_weights() promotes only the small routing softmax to fp32.
                 pose_weights = self.look_bank.pose_weights(rings, coverage)
-        if self.look_bank.compact_variable_rings:
-            # Restore the caller's AMP context for the large K24/K12 GEMMs.
-            # pose_weights() promotes only the small routing softmax to fp32.
-            pose_weights = self.look_bank.pose_weights(rings, coverage)
-        pose_weights = pose_weights.flatten(-2)
-        fields = fields.flatten(1, 2)
+            pose_weights = pose_weights.flatten(-2)
+            fields = fields.flatten(1, 2)
+        else:
+            pose_weights = fields = None
         stage_ring_biases = None
         for layer_index, block in enumerate(self.blocks):
-            start = layer_index * self.num_heads
-            stop = start + self.num_heads
-            layer_pose = pose_weights[:, :, start:stop]
-            layer_fields = fields[start:stop]
+            if self.center_look is not None:
+                layer_pose = shared_pose
+                layer_fields = self.center_look.fields(
+                    layer_index, dtype=tokens.dtype
+                )
+            else:
+                start = layer_index * self.num_heads
+                stop = start + self.num_heads
+                layer_pose = pose_weights[:, :, start:stop]
+                layer_fields = fields[start:stop]
             norm1_input = None
             if (
                 self.feature_ring_matcher is not None
@@ -207,6 +241,11 @@ class DeiTTinyRotHexLook(nn.Module):
                 norm1_input=norm1_input,
             )
         return self.norm(tokens)
+
+    def experiment_diagnostics(self) -> dict[str, object]:
+        if self.center_look is None:
+            return {}
+        return {"center_pose_angular_look": self.center_look.diagnostics()}
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return self.head(self.forward_features(image)[:, 0])
