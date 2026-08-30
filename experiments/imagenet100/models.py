@@ -33,6 +33,7 @@ MODEL_VARIANTS = {
     "rot_hex_harmonic_l1_softmax_pe",
     "rot_hex_dot_grouped_compensated_pe",
     "rot_hex_harmonic_look", "rot_hex_harmonic_pe_look",
+    "rot_hex_harmonic_look_ring", "rot_hex_harmonic_pe_look_ring",
 }
 
 
@@ -51,6 +52,8 @@ def build_imagenet100_model(
     rot_global_directions: int = 8,
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
+    feature_ring_look: bool = False,
+    feature_ring_start_layer: int = 6,
     rot_prototype_chunk_size: int = 16,
     rot_use_null: bool = True,
     rot_null_initial_score: float = -1.0,
@@ -131,11 +134,19 @@ def build_imagenet100_model(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
             "set pretrained=false"
         )
-    if variant in {"rot_hex_harmonic_look", "rot_hex_harmonic_pe_look"}:
+    if variant in {
+        "rot_hex_harmonic_look",
+        "rot_hex_harmonic_pe_look",
+        "rot_hex_harmonic_look_ring",
+        "rot_hex_harmonic_pe_look_ring",
+    }:
         return DeiTTinyRotHexLook(
             num_classes=num_classes,
             image_size=image_size,
-            use_pos_embed=variant == "rot_hex_harmonic_pe_look",
+            use_pos_embed=variant in {
+                "rot_hex_harmonic_pe_look",
+                "rot_hex_harmonic_pe_look_ring",
+            },
             lattice_stride=hex_stride,
             kernel_sizes=rot_kernel_sizes,
             bases=rot_bases,
@@ -143,6 +154,14 @@ def build_imagenet100_model(
             global_directions=rot_global_directions,
             angular_bins_per_radius=rot_angular_bins_per_radius,
             look_compact_variable_rings=look_compact_variable_rings,
+            feature_ring_look=(
+                feature_ring_look
+                or variant in {
+                    "rot_hex_harmonic_look_ring",
+                    "rot_hex_harmonic_pe_look_ring",
+                }
+            ),
+            feature_ring_start_layer=feature_ring_start_layer,
             prototype_chunk_size=rot_prototype_chunk_size,
             tokenizer_null_initial_score=rot_null_initial_score,
         )

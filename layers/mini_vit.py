@@ -144,9 +144,14 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         attn_bias: torch.Tensor | None = None,
         structured_look: tuple[torch.Tensor, torch.Tensor] | None = None,
+        norm1_input: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if norm1_input is None:
+            norm1_input = self.norm1(x)
+        elif norm1_input.shape != x.shape:
+            raise ValueError("norm1_input must have the same shape as x")
         x = x + self.attn(
-            self.norm1(x), attn_bias=attn_bias, structured_look=structured_look
+            norm1_input, attn_bias=attn_bias, structured_look=structured_look
         )
         x = x + self.mlp(self.norm2(x))
         return x

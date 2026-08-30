@@ -6,6 +6,7 @@ import torch.nn as nn
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
+from layers.two_ring_circular_look import TwoRingCircularLookMatcher
 
 
 class DeiTTinyRotHexLook(nn.Module):
@@ -31,6 +32,8 @@ class DeiTTinyRotHexLook(nn.Module):
         global_directions: int = 8,
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
+        feature_ring_look: bool = False,
+        feature_ring_start_layer: int = 6,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
     ) -> None:
@@ -120,6 +123,21 @@ class DeiTTinyRotHexLook(nn.Module):
                 lattice_stride if look_compact_variable_rings else None
             ),
         )
+        self.feature_ring_look = bool(feature_ring_look)
+        if self.feature_ring_look:
+            if global_directions != 12:
+                raise ValueError(
+                    "two-ring feature Look requires a full 12-direction Look period"
+                )
+            self.feature_ring_matcher = TwoRingCircularLookMatcher(
+                coordinates=patch_coordinates,
+                depth=self.depth,
+                num_heads=self.num_heads,
+                head_dim=self.embed_dim // self.num_heads,
+                start_layer=feature_ring_start_layer,
+            )
+        else:
+            self.feature_ring_matcher = None
 
     def forward_features(self, image: torch.Tensor) -> torch.Tensor:
         tokens = self.patch_embed(image)
@@ -150,9 +168,30 @@ class DeiTTinyRotHexLook(nn.Module):
             stop = start + self.num_heads
             layer_pose = pose_weights[:, :, start:stop]
             layer_fields = fields[start:stop]
+            norm1_input = None
+            if (
+                self.feature_ring_matcher is not None
+                and layer_index >= self.feature_ring_matcher.start_layer
+            ):
+                norm1_input = block.norm1(tokens)
+                inner, outer = self.feature_ring_matcher(
+                    norm1_input[:, 1:], layer_index=layer_index
+                )
+                # Preserve the existing 2x6 Look basis.  Full C6/C12 ring
+                # responses are compressed into it by learned circular maps,
+                # avoiding any increase in the attention pose dimension.
+                base = layer_pose.reshape(
+                    layer_pose.shape[0], layer_pose.shape[1], self.num_heads,
+                    self.look_bank.num_scales, self.look_bank.source_directions,
+                )
+                correction = self.feature_ring_matcher.project_to_pose(
+                    inner, outer, layer_index=layer_index
+                )
+                layer_pose = (base + correction.to(base.dtype)).flatten(-2)
             tokens = block(
                 tokens,
                 structured_look=(layer_pose, layer_fields),
+                norm1_input=norm1_input,
             )
         return self.norm(tokens)
 

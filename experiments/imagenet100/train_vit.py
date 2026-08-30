@@ -65,6 +65,8 @@ class TrainConfig:
     rot_global_directions: int = 8
     rot_angular_bins_per_radius: int = 4
     look_compact_variable_rings: bool = False
+    feature_ring_look: bool = False
+    feature_ring_start_layer: int = 6
     rot_prototype_chunk_size: int = 16
     rot_use_null: bool = True
     rot_null_initial_score: float = -1.0
@@ -545,6 +547,8 @@ def main() -> None:
         rot_global_directions=config.rot_global_directions,
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
         look_compact_variable_rings=config.look_compact_variable_rings,
+        feature_ring_look=config.feature_ring_look,
+        feature_ring_start_layer=config.feature_ring_start_layer,
         rot_prototype_chunk_size=config.rot_prototype_chunk_size,
         rot_use_null=config.rot_use_null,
         rot_null_initial_score=config.rot_null_initial_score,
