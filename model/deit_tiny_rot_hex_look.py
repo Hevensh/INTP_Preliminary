@@ -33,7 +33,7 @@ class DeiTTinyRotHexLook(nn.Module):
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
         feature_ring_look: bool = False,
-        feature_ring_start_layer: int = 6,
+        feature_ring_start_layer: int = 8,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
     ) -> None:
@@ -177,20 +177,14 @@ class DeiTTinyRotHexLook(nn.Module):
                 inner, outer = self.feature_ring_matcher(
                     norm1_input[:, 1:], layer_index=layer_index
                 )
-                # Preserve the existing 2x6 Look basis.  Full C6/C12 ring
-                # responses are compressed into it by learned circular maps,
-                # avoiding any increase in the attention pose dimension.
-                base = layer_pose.reshape(
-                    layer_pose.shape[0], layer_pose.shape[1], self.num_heads,
-                    self.look_bank.num_scales, self.look_bank.source_directions,
-                )
-                correction = self.feature_ring_matcher.project_to_pose(
+                dense_ring_bias = self.feature_ring_matcher.dense_look_bias(
                     inner, outer, layer_index=layer_index
                 )
-                layer_pose = (base + correction.to(base.dtype)).flatten(-2)
+            else:
+                dense_ring_bias = None
             tokens = block(
                 tokens,
-                structured_look=(layer_pose, layer_fields),
+                structured_look=(layer_pose, layer_fields, dense_ring_bias),
                 norm1_input=norm1_input,
             )
         return self.norm(tokens)

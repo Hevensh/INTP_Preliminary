@@ -34,6 +34,29 @@ def test_cpu_wrapper_matches_reference_and_all_gradients():
         torch.testing.assert_close(actual_input.grad, expected_input.grad)
 
 
+def test_cpu_dense_correction_matches_reference_and_all_gradients():
+    actual_inputs = _inputs("cpu")
+    dense = torch.randn(2, 3, 7, 7, requires_grad=True)
+    expected_inputs = tuple(
+        x.detach().clone().requires_grad_(True) for x in actual_inputs
+    )
+    expected_dense = dense.detach().clone().requires_grad_(True)
+    scale = 1 / 16**0.5
+    actual = structured_look_attention(
+        *actual_inputs, scale=scale, dense_bias=dense
+    )
+    expected = reference_structured_look_attention(
+        *expected_inputs, scale=scale, dense_bias=expected_dense
+    )
+    gradient = torch.randn_like(actual)
+    actual.backward(gradient)
+    expected.backward(gradient)
+    torch.testing.assert_close(actual, expected)
+    for actual_input, expected_input in zip(actual_inputs, expected_inputs):
+        torch.testing.assert_close(actual_input.grad, expected_input.grad)
+    torch.testing.assert_close(dense.grad, expected_dense.grad)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_triton_matches_reference_forward_and_all_gradients():
     actual_inputs = _inputs("cuda")
@@ -49,6 +72,34 @@ def test_triton_matches_reference_forward_and_all_gradients():
         torch.testing.assert_close(
             actual_input.grad, expected_input.grad, atol=3e-5, rtol=3e-5
         )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_triton_dense_correction_matches_reference_and_all_gradients():
+    actual_inputs = _inputs("cuda")
+    dense = torch.randn(2, 3, 7, 7, device="cuda", requires_grad=True)
+    expected_inputs = tuple(
+        x.detach().clone().requires_grad_(True) for x in actual_inputs
+    )
+    expected_dense = dense.detach().clone().requires_grad_(True)
+    scale = 1 / 16**0.5
+    actual = structured_look_attention(
+        *actual_inputs, scale=scale, dense_bias=dense
+    )
+    expected = reference_structured_look_attention(
+        *expected_inputs, scale=scale, dense_bias=expected_dense
+    )
+    torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
+    gradient = torch.randn_like(actual)
+    actual.backward(gradient)
+    expected.backward(gradient)
+    for actual_input, expected_input in zip(actual_inputs, expected_inputs):
+        torch.testing.assert_close(
+            actual_input.grad, expected_input.grad, atol=3e-5, rtol=3e-5
+        )
+    torch.testing.assert_close(
+        dense.grad, expected_dense.grad, atol=3e-5, rtol=3e-5
+    )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")

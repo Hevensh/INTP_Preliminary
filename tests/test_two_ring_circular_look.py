@@ -50,8 +50,8 @@ def test_two_ring_matcher_stores_only_c6_and_c12_banks():
     ) == 12 * 64
     assert matcher.inner_relative.shape == (6, 6)
     assert matcher.outer_relative.shape == (12, 12)
-    assert matcher.inner_to_pose.shape == (1, 3, 12)
-    assert matcher.outer_to_pose.shape == (1, 3, 12)
+    assert matcher.inner_look_grid.shape == (1, 3, 4, 12)
+    assert matcher.outer_look_grid.shape == (1, 3, 4, 12)
     assert (matcher.inner_valid.sum(dim=1) == 6).any()
     assert (matcher.outer_valid.sum(dim=1) == 12).any()
 
@@ -74,18 +74,22 @@ def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
     inner, outer = matcher(features, layer_index=0)
     assert inner.shape == (2, coordinates.shape[0], 3, 6)
     assert outer.shape == (2, coordinates.shape[0], 3, 12)
-    pose = matcher.project_to_pose(inner, outer, layer_index=0)
-    assert pose.shape == (2, coordinates.shape[0], 3, 2, 6)
+    dense_bias = matcher.dense_look_bias(inner, outer, layer_index=0)
+    assert dense_bias.shape == (
+        2, 3, coordinates.shape[0], coordinates.shape[0]
+    )
     torch.testing.assert_close(inner.mean(dim=-1), torch.zeros_like(inner[..., 0]))
     torch.testing.assert_close(outer.mean(dim=-1), torch.zeros_like(outer[..., 0]))
-    pose.square().mean().backward()
+    loss = inner.square().mean() + outer.square().mean()
+    loss = loss + dense_bias.square().mean()
+    loss.backward()
     assert torch.isfinite(features.grad).all()
     assert torch.isfinite(matcher.inner_radius.grad).all()
     assert torch.isfinite(matcher.inner_phase.grad).all()
     assert torch.isfinite(matcher.outer_radius.grad).all()
     assert torch.isfinite(matcher.outer_phase.grad).all()
-    assert torch.isfinite(matcher.inner_to_pose.grad).all()
-    assert torch.isfinite(matcher.outer_to_pose.grad).all()
+    assert torch.isfinite(matcher.inner_look_grid.grad).all()
+    assert torch.isfinite(matcher.outer_look_grid.grad).all()
 
 
 def test_spatial_and_paired_weight_rotation_are_synchronized():

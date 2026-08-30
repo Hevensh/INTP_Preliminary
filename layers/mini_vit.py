@@ -62,7 +62,7 @@ class MultiHeadSelfAttention(nn.Module):
         self,
         x: torch.Tensor,
         attn_bias: torch.Tensor | None = None,
-        structured_look: tuple[torch.Tensor, torch.Tensor] | None = None,
+        structured_look: tuple[torch.Tensor, ...] | None = None,
     ) -> torch.Tensor:
         bsz, seq_len, dim = x.shape
         qkv = self.qkv(x)  # (B, N, 3D)
@@ -88,9 +88,16 @@ class MultiHeadSelfAttention(nn.Module):
         if structured_look is not None:
             from layers.triton_structured_look_attention import structured_look_attention
 
-            pose, fields = structured_look
+            if len(structured_look) == 2:
+                pose, fields = structured_look
+                dense_bias = None
+            elif len(structured_look) == 3:
+                pose, fields, dense_bias = structured_look
+            else:
+                raise ValueError("structured_look must contain 2 or 3 tensors")
             out = structured_look_attention(
-                q, k, v, pose, fields, scale=self.scale
+                q, k, v, pose, fields, scale=self.scale,
+                dense_bias=dense_bias,
             )
         elif hasattr(F, "scaled_dot_product_attention") and attn_bias is None:
             out = F.scaled_dot_product_attention(
@@ -143,7 +150,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         attn_bias: torch.Tensor | None = None,
-        structured_look: tuple[torch.Tensor, torch.Tensor] | None = None,
+        structured_look: tuple[torch.Tensor, ...] | None = None,
         norm1_input: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if norm1_input is None:

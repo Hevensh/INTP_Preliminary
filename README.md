@@ -66,17 +66,17 @@ radial resolution is twice the number of tokenizer scales. For example, the
 current `half6d3r` tokenizer uses a `12 direction x 4 radius` Look field.
 
 An experimental deep-feature refinement keeps the original image-derived Look
-path and augments only the final six Transformer blocks.  For every query token
+path and augments only the final four Transformer blocks.  For every query token
 it reads the exact first and second Hex graph rings, correlates the six inner
 neighbors over C6 and the twelve outer neighbors over C12, and ignores the
 center token.  Each layer/head stores only 6 + 12 shared `head_dim -> 1`
 projections. Their paired feature weights use polar `(radius, phase)` storage,
 so rotating a candidate both circularly shifts its spatial positions and adds
 the same angle to its feature-pair phases; each position still owns exactly
-`head_dim` parameters. Two learned relative-angle maps compress the complete
-ring responses back into the existing two-scale, six-pose Look coefficients,
-so the attention kernel keeps the same pose dimension and does not materialize
-a dense attention-bias tensor.
+`head_dim` parameters. Inner and outer responses each control an independently
+learned canonical `4 radius x 12 direction` dense Look map. The map rotates with
+the detected pose and is appended to the original image-derived Look terms;
+the implementation still avoids materializing a dense attention-bias tensor.
 
 ## Main experiment configurations
 

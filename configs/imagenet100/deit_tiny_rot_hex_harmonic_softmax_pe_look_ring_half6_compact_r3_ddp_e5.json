@@ -33,7 +33,7 @@
   "rot_angular_bins_per_radius": 3,
   "look_compact_variable_rings": true,
   "feature_ring_look": true,
-  "feature_ring_start_layer": 6,
+  "feature_ring_start_layer": 8,
   "rot_prototype_chunk_size": 16,
   "rot_use_null": true,
   "rot_null_initial_score": 0.0

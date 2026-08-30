@@ -30,6 +30,7 @@ def reference_structured_look_attention(
     fields: torch.Tensor,
     *,
     scale: float,
+    dense_bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Explicit correctness oracle.
 
@@ -44,24 +45,31 @@ def reference_structured_look_attention(
     scores = scores * float(scale)
     scores = scores.clone()
     scores[:, :, 1:, 1:] += look.float()
+    if dense_bias is not None:
+        expected = (q.shape[0], q.shape[1], patch_count, patch_count)
+        if dense_bias.shape != expected:
+            raise ValueError(f"dense_bias must have shape {expected}")
+        scores[:, :, 1:, 1:] += dense_bias.float()
     probability = scores.softmax(dim=-1)
     return (probability @ v.float()).to(q.dtype)
 
 
 @triton.jit
 def _structured_look_forward(
-    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr, output_ptr, lse_ptr,
+    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr, dense_ptr, output_ptr, lse_ptr,
     stride_qb, stride_qh, stride_qn, stride_qd,
     stride_kb, stride_kh, stride_kn, stride_kd,
     stride_vb, stride_vh, stride_vn, stride_vd,
     stride_pb, stride_pq, stride_ph, stride_pp,
     stride_fh, stride_fp, stride_fq, stride_fk,
+    stride_db, stride_dh, stride_dq, stride_dk,
     stride_ob, stride_oh, stride_on, stride_od,
     heads: tl.constexpr,
     sequence: tl.constexpr,
     patch_count: tl.constexpr,
     head_dim: tl.constexpr,
     poses: tl.constexpr,
+    has_dense: tl.constexpr,
     scale: tl.constexpr,
     block_m: tl.constexpr,
     block_n: tl.constexpr,
@@ -117,6 +125,15 @@ def _structured_look_forward(
                 other=0.0,
             ).to(tl.float32)
             score += probability[:, None] * field
+        if has_dense:
+            dense = tl.load(
+                dense_ptr + batch * stride_db + head * stride_dh
+                + patch_query[:, None] * stride_dq
+                + patch_key[None, :] * stride_dk,
+                mask=look_valid,
+                other=0.0,
+            ).to(tl.float32)
+            score += dense
         score = tl.where(query_mask[:, None] & key_mask[None, :], score, -float("inf"))
 
         new_max = tl.maximum(row_max, tl.max(score, axis=1))
@@ -151,7 +168,7 @@ def _structured_look_forward(
 
 @triton.jit
 def _structured_look_probability_score_grad(
-    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr,
+    q_ptr, k_ptr, v_ptr, pose_ptr, field_ptr, dense_ptr,
     grad_output_ptr, output_ptr, lse_ptr,
     probability_ptr, score_grad_ptr,
     stride_qb, stride_qh, stride_qn, stride_qd,
@@ -159,6 +176,7 @@ def _structured_look_probability_score_grad(
     stride_vb, stride_vh, stride_vn, stride_vd,
     stride_pb, stride_pq, stride_ph, stride_pp,
     stride_fh, stride_fp, stride_fq, stride_fk,
+    stride_db, stride_dh, stride_dq, stride_dk,
     stride_gob, stride_goh, stride_gon, stride_god,
     stride_ob, stride_oh, stride_on, stride_od,
     stride_prob_b, stride_prob_h, stride_prob_q, stride_prob_k,
@@ -167,6 +185,7 @@ def _structured_look_probability_score_grad(
     patch_count: tl.constexpr,
     head_dim: tl.constexpr,
     poses: tl.constexpr,
+    has_dense: tl.constexpr,
     scale: tl.constexpr,
     block_m: tl.constexpr,
     block_n: tl.constexpr,
@@ -237,6 +256,15 @@ def _structured_look_probability_score_grad(
                 other=0.0,
             ).to(tl.float32)
             score += pose_probability[:, None] * field
+        if has_dense:
+            dense = tl.load(
+                dense_ptr + batch * stride_db + head * stride_dh
+                + patch_query[:, None] * stride_dq
+                + patch_key[None, :] * stride_dk,
+                mask=look_valid,
+                other=0.0,
+            ).to(tl.float32)
+            score += dense
 
         probability = tl.exp(score - lse[:, None])
         probability = tl.where(
@@ -263,7 +291,7 @@ def _structured_look_probability_score_grad(
 
 class _StructuredLookAttention(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, pose, fields, scale):
+    def forward(ctx, q, k, v, pose, fields, dense_bias, scale):
         if not all(tensor.is_cuda for tensor in (q, k, v, pose, fields)):
             raise ValueError("Triton structured Look attention requires CUDA tensors")
         if q.shape != k.shape or q.shape != v.shape or q.ndim != 4:
@@ -276,6 +304,11 @@ class _StructuredLookAttention(torch.autograd.Function):
             raise ValueError("pose shape is inconsistent with q")
         if fields.shape != (heads, poses, patch_count, patch_count):
             raise ValueError("fields shape is inconsistent with pose")
+        has_dense = dense_bias.numel() > 0
+        if has_dense and dense_bias.shape != (
+            batch, heads, patch_count, patch_count
+        ):
+            raise ValueError("dense_bias shape is inconsistent with q")
         if sequence != patch_count + 1:
             raise ValueError("sequence must be patch_count + one CLS token")
         block_d = triton.next_power_of_2(head_dim)
@@ -287,22 +320,24 @@ class _StructuredLookAttention(torch.autograd.Function):
         )
         block_m, block_n = 16, 32
         _structured_look_forward[(batch * heads, triton.cdiv(sequence, block_m))](
-            q, k, v, pose, fields, output, lse,
+            q, k, v, pose, fields, dense_bias, output, lse,
             *q.stride(), *k.stride(), *v.stride(), *pose.stride(), *fields.stride(),
+            *(dense_bias.stride() if has_dense else (0, 0, 0, 0)),
             *output.stride(),
             heads=heads, sequence=sequence, patch_count=patch_count,
-            head_dim=head_dim, poses=poses, scale=float(scale),
+            head_dim=head_dim, poses=poses, has_dense=has_dense, scale=float(scale),
             block_m=block_m, block_n=block_n, block_d=block_d,
             num_warps=4,
         )
         ctx.scale = float(scale)
-        ctx.save_for_backward(q, k, v, pose, fields, output, lse)
+        ctx.has_dense = has_dense
+        ctx.save_for_backward(q, k, v, pose, fields, dense_bias, output, lse)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        q, k, v, pose, fields, output, lse = ctx.saved_tensors
-        needs = ctx.needs_input_grad[:5]
+        q, k, v, pose, fields, dense_bias, output, lse = ctx.saved_tensors
+        needs = ctx.needs_input_grad[:6]
         batch, heads, sequence, head_dim = q.shape
         patch_count, poses = pose.shape[1], pose.shape[-1]
         block_m, block_n = 16, 32
@@ -319,17 +354,18 @@ class _StructuredLookAttention(torch.autograd.Function):
             triton.cdiv(sequence, block_m),
         )
         _structured_look_probability_score_grad[grid](
-            q, k, v, pose, fields, grad_output, output, lse,
+            q, k, v, pose, fields, dense_bias, grad_output, output, lse,
             probability, score_grad,
             *q.stride(), *k.stride(), *v.stride(), *pose.stride(), *fields.stride(),
+            *(dense_bias.stride() if ctx.has_dense else (0, 0, 0, 0)),
             *grad_output.stride(), *output.stride(), *probability.stride(),
             heads=heads, sequence=sequence, patch_count=patch_count,
-            head_dim=head_dim, poses=poses, scale=ctx.scale,
+            head_dim=head_dim, poses=poses, has_dense=ctx.has_dense, scale=ctx.scale,
             block_m=block_m, block_n=block_n, block_d=block_d,
             num_warps=4,
         )
 
-        grad_q = grad_k = grad_v = grad_pose = grad_fields = None
+        grad_q = grad_k = grad_v = grad_pose = grad_fields = grad_dense = None
         if needs[0]:
             grad_q = (score_grad @ k) * ctx.scale
         if needs[1]:
@@ -346,13 +382,21 @@ class _StructuredLookAttention(torch.autograd.Function):
             grad_fields = torch.einsum(
                 "bhqk,bqhp->hpqk", patch_score_grad, pose.float()
             ).to(fields.dtype)
-        return grad_q, grad_k, grad_v, grad_pose, grad_fields, None
+        if needs[5] and ctx.has_dense:
+            grad_dense = patch_score_grad.to(dense_bias.dtype)
+        return grad_q, grad_k, grad_v, grad_pose, grad_fields, grad_dense, None
 
 
-def structured_look_attention(q, k, v, pose, fields, *, scale):
+def structured_look_attention(
+    q, k, v, pose, fields, *, scale, dense_bias=None
+):
     """Memory-bounded attention; CPU uses the explicit reference oracle."""
     if not q.is_cuda:
         return reference_structured_look_attention(
-            q, k, v, pose, fields, scale=scale
+            q, k, v, pose, fields, scale=scale, dense_bias=dense_bias
         )
-    return _StructuredLookAttention.apply(q, k, v, pose, fields, float(scale))
+    if dense_bias is None:
+        dense_bias = q.new_empty(0)
+    return _StructuredLookAttention.apply(
+        q, k, v, pose, fields, dense_bias, float(scale)
+    )

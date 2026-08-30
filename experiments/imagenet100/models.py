@@ -53,7 +53,7 @@ def build_imagenet100_model(
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
     feature_ring_look: bool = False,
-    feature_ring_start_layer: int = 6,
+    feature_ring_start_layer: int = 8,
     rot_prototype_chunk_size: int = 16,
     rot_use_null: bool = True,
     rot_null_initial_score: float = -1.0,
