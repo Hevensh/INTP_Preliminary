@@ -91,12 +91,10 @@ class TwoRingCircularLookMatcher(nn.Module):
 
         self.inner_radius, self.inner_phase = self._make_polar_weight(6)
         self.outer_radius, self.outer_phase = self._make_polar_weight(12)
-        # One canonical dense 4x12 Look map per ring. Candidate orientations
-        # rotate this shared map; no absolute-pose copies are stored.
-        self.inner_look_grid = nn.Parameter(
-            torch.randn(self.active_depth, num_heads, 4, 12) * 0.02
-        )
-        self.outer_look_grid = nn.Parameter(
+        # One canonical dense 4x12 Look map is shared by both graph scales,
+        # exactly like the image-derived Look path. The outer and inner rings
+        # select its large and small transformed supports respectively.
+        self.look_grid = nn.Parameter(
             torch.randn(self.active_depth, num_heads, 4, 12) * 0.02
         )
         # Zero initialization preserves the existing Look model exactly and
@@ -148,25 +146,30 @@ class TwoRingCircularLookMatcher(nn.Module):
         angle = torch.remainder(
             torch.atan2(relative[..., 1], relative[..., 0]), 2.0 * math.pi
         )
-        radial_position = distance / 4.0 * 4.0 - 1.0
-        radial0 = radial_position.floor().clamp(0, 3).long()
-        radial1 = (radial0 + 1).clamp_max(3)
-        radial_fraction = (
-            radial_position - radial_position.floor()
-        ).clamp(0.0, 1.0)
+        radial0, radial1, radial_fraction, valid = [], [], [], []
+        # Match the established Look scale order: large 1.0, small 0.5.
+        for scale in (1.0, 0.5):
+            effective_radius = 4.0 * scale
+            radial_position = distance / effective_radius * 4.0 - 1.0
+            r0 = radial_position.floor().clamp(0, 3).long()
+            radial0.append(r0)
+            radial1.append((r0 + 1).clamp_max(3))
+            radial_fraction.append(
+                (radial_position - radial_position.floor()).clamp(0.0, 1.0)
+            )
+            valid.append((distance > 0) & (distance <= effective_radius))
         angular_position = angle / (2.0 * math.pi) * 12.0
         angular0 = angular_position.floor().long() % 12
         angular1 = (angular0 + 1) % 12
         angular_fraction = angular_position - angular_position.floor()
-        valid = (distance > 0) & (distance <= 4.0)
         for name, value in (
-            ("look_radial0", radial0),
-            ("look_radial1", radial1),
-            ("look_radial_fraction", radial_fraction),
+            ("look_radial0", torch.stack(radial0)),
+            ("look_radial1", torch.stack(radial1)),
+            ("look_radial_fraction", torch.stack(radial_fraction)),
             ("look_angular0", angular0),
             ("look_angular1", angular1),
             ("look_angular_fraction", angular_fraction),
-            ("look_valid", valid),
+            ("look_valid", torch.stack(valid)),
         ):
             self.register_buffer(name, value, persistent=False)
 
@@ -185,16 +188,21 @@ class TwoRingCircularLookMatcher(nn.Module):
             dim=1,
         )
 
-    def _sample_query_grids(self, grid: torch.Tensor) -> torch.Tensor:
+    def _sample_query_grids(
+        self,
+        grid: torch.Tensor,
+        *,
+        scale_index: int,
+    ) -> torch.Tensor:
         return dense_look_grid_sample(
             grid,
-            self.look_radial0,
-            self.look_radial1,
+            self.look_radial0[scale_index],
+            self.look_radial1[scale_index],
             self.look_angular0,
             self.look_angular1,
-            self.look_radial_fraction,
+            self.look_radial_fraction[scale_index],
             self.look_angular_fraction,
-            self.look_valid,
+            self.look_valid[scale_index],
         )
 
     @staticmethod
@@ -311,18 +319,24 @@ class TwoRingCircularLookMatcher(nn.Module):
         active_layer = layer_index - self.start_layer
         if not 0 <= active_layer < self.active_depth:
             raise ValueError("layer_index is outside the active matcher range")
+        canonical_grid = self.look_grid[active_layer]
         inner_grid = self._rotated_look_grids(
-            self.inner_look_grid[active_layer],
+            canonical_grid,
             directions=6,
             angular_stride=2,
         )
         outer_grid = self._rotated_look_grids(
-            self.outer_look_grid[active_layer],
+            canonical_grid,
             directions=12,
             angular_stride=1,
         )
-        query_grid = torch.einsum("bqhd,hdrt->bqhrt", inner, inner_grid)
-        query_grid = query_grid + torch.einsum(
+        inner_query_grid = torch.einsum(
+            "bqhd,hdrt->bqhrt", inner, inner_grid
+        )
+        outer_query_grid = torch.einsum(
             "bqhd,hdrt->bqhrt", outer, outer_grid
         )
-        return self._sample_query_grids(query_grid)
+        # Inner C6 is the small scale; outer C12 is the large scale.
+        return self._sample_query_grids(
+            inner_query_grid, scale_index=1
+        ) + self._sample_query_grids(outer_query_grid, scale_index=0)

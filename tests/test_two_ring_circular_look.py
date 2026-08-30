@@ -3,6 +3,7 @@ import math
 import torch
 
 from experiments.imagenet100.models import build_imagenet100_model
+from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
 
 
@@ -50,8 +51,15 @@ def test_two_ring_matcher_stores_only_c6_and_c12_banks():
     ) == 12 * 64
     assert matcher.inner_relative.shape == (6, 6)
     assert matcher.outer_relative.shape == (12, 12)
-    assert matcher.inner_look_grid.shape == (1, 3, 4, 12)
-    assert matcher.outer_look_grid.shape == (1, 3, 4, 12)
+    assert matcher.look_grid.shape == (1, 3, 4, 12)
+    assert matcher.look_radial0.shape == (
+        2, coordinates.shape[0], coordinates.shape[0]
+    )
+    # The two graph rings are two transformed supports of one canonical map:
+    # C12 uses the larger support and C6 the contracted support.
+    assert matcher.look_valid[0].sum() > matcher.look_valid[1].sum()
+    assert not hasattr(matcher, "inner_look_grid")
+    assert not hasattr(matcher, "outer_look_grid")
     assert (matcher.inner_valid.sum(dim=1) == 6).any()
     assert (matcher.outer_valid.sum(dim=1) == 12).any()
 
@@ -88,8 +96,7 @@ def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
     assert torch.isfinite(matcher.inner_phase.grad).all()
     assert torch.isfinite(matcher.outer_radius.grad).all()
     assert torch.isfinite(matcher.outer_phase.grad).all()
-    assert torch.isfinite(matcher.inner_look_grid.grad).all()
-    assert torch.isfinite(matcher.outer_look_grid.grad).all()
+    assert torch.isfinite(matcher.look_grid.grad).all()
 
 
 def test_spatial_and_paired_weight_rotation_are_synchronized():
@@ -122,6 +129,58 @@ def test_spatial_and_paired_weight_rotation_are_synchronized():
         dim=-1,
     ).flatten(-2)
     torch.testing.assert_close(rendered[:, 1], expected)
+
+
+def test_ring_scales_match_original_shared_look_grid_transforms():
+    base = _build("rot_hex_harmonic_pe_look")
+    coordinates = torch.stack(
+        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
+    )
+    matcher = TwoRingCircularLookMatcher(
+        coordinates=coordinates,
+        depth=1,
+        num_heads=3,
+        head_dim=64,
+        start_layer=0,
+    )
+    reference = SquarePatchDenseGridLook(
+        image_size=224,
+        patch_size=16,
+        num_heads=3,
+        prototype_angular_bins=24,
+        source_directions=12,
+        source_direction_period=12,
+        scales=(1.0, 0.5),
+        prototype_radius=12.0,
+        look_direction_bins=12,
+        look_radial_bins=4,
+        look_radius=4.0,
+        patch_centers_xy=coordinates,
+        patch_coordinates_xy=coordinates,
+    )
+    canonical = torch.randn(3, 4, 12)
+    with torch.no_grad():
+        matcher.look_grid[0].copy_(canonical)
+        reference.look_grid.copy_(canonical)
+    fields = reference.transformed_look_grids()
+    patches = coordinates.shape[0]
+
+    # C12 direction 3 is the large-scale transform at 90 degrees.
+    inner = torch.zeros(1, patches, 3, 6)
+    outer = torch.zeros(1, patches, 3, 12)
+    outer[..., 3] = 1.0
+    actual_large = matcher.dense_look_bias(inner, outer, layer_index=0)
+    expected_large = fields[:, 0, 3].unsqueeze(0)
+    torch.testing.assert_close(actual_large, expected_large)
+
+    # C6 direction 2 is 120 degrees, i.e. full-period direction index 4,
+    # while using the contracted 0.5-scale support of the same table.
+    inner.zero_()
+    outer.zero_()
+    inner[..., 2] = 1.0
+    actual_small = matcher.dense_look_bias(inner, outer, layer_index=0)
+    expected_small = fields[:, 1, 4].unsqueeze(0)
+    torch.testing.assert_close(actual_small, expected_small)
 
 
 def test_zero_gated_ring_variant_matches_existing_pe_look_model():

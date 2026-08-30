@@ -73,10 +73,11 @@ center token.  Each layer/head stores only 6 + 12 shared `head_dim -> 1`
 projections. Their paired feature weights use polar `(radius, phase)` storage,
 so rotating a candidate both circularly shifts its spatial positions and adds
 the same angle to its feature-pair phases; each position still owns exactly
-`head_dim` parameters. Inner and outer responses each control an independently
-learned canonical `4 radius x 12 direction` dense Look map. The map rotates with
-the detected pose and is appended to the original image-derived Look terms;
-the implementation still avoids materializing a dense attention-bias tensor.
+`head_dim` parameters. Inner and outer responses share one learned canonical
+`4 radius x 12 direction` dense Look map, matching the image-derived path: C6
+uses its small-scale transform and C12 uses its large-scale transform. The map
+rotates with the detected pose and is appended to the original image-derived
+Look terms; the implementation still avoids repeating pose-field sampling.
 
 ## Main experiment configurations
 
