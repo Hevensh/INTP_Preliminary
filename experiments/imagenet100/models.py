@@ -15,12 +15,13 @@ from model.resnet_geometric_baselines import (
     build_resnet18_multiscale_rotconv,
     build_resnet18_rotconv,
 )
-from model.resnet_mams import build_resnet18_mams
+from model.resnet_mams import build_resnet18_mams, build_resnet18_mams_fourv_paired
 
 
 MODEL_VARIANTS = {
     "resnet18", "resnet18_multiscale", "resnet18_rotconv4",
     "resnet18_multiscale_rotconv4", "resnet18_mams",
+    "resnet18_mams_fourv_paired",
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
@@ -93,6 +94,20 @@ def build_imagenet100_model(
             angular_bins_per_radius=rot_angular_bins_per_radius,
             prototype_chunk_size=rot_prototype_chunk_size,
             use_null=rot_use_null,
+            null_initial_score=rot_null_initial_score,
+        )
+    if variant == "resnet18_mams_fourv_paired":
+        if pretrained:
+            raise ValueError("the paired MAMS ResNet comparison is trained from scratch")
+        if len(rot_kernel_sizes) != 2:
+            raise ValueError("paired four-value MAMS requires exactly two scales")
+        return build_resnet18_mams_fourv_paired(
+            num_classes=num_classes,
+            diameters=(int(rot_kernel_sizes[0]), int(rot_kernel_sizes[1])),
+            directions=rot_directions,
+            global_directions=rot_global_directions,
+            angular_bins_per_radius=rot_angular_bins_per_radius,
+            prototype_chunk_size=rot_prototype_chunk_size,
             null_initial_score=rot_null_initial_score,
         )
     if variant != "deit_tiny" and pretrained:
