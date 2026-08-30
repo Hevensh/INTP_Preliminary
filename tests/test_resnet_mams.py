@@ -7,11 +7,13 @@ from layers.cartesian_rotating_harmonic_conv import (
 )
 from model.resnet_mams import MAMSBasicBlock
 from model.resnet_mams import FourValuePairedMAMSBasicBlock
+from model.resnet_mams import StageRoutedMAMS
 from layers.cartesian_four_value_paired_mams import (
     CartesianFourValuePairedMAMSConv2d,
     ComplexPointwiseConv2d,
     PairedRMSNorm2d,
 )
+from layers.cartesian_stage_mams import CartesianStageMAMSRouting2d
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
 from layers.triton_polar_renderer import triton_polar_render
 
@@ -174,6 +176,79 @@ def test_resnet18_four_value_paired_mams_structure():
     assert all(block.paired_input for block in blocks[1:])
     assert isinstance(blocks[2].shortcut, ComplexPointwiseConv2d)
     assert not any(isinstance(module, torch.nn.BatchNorm2d) for module in model.modules())
+
+    model.eval()
+    with torch.inference_mode():
+        output = model(torch.randn(1, 3, 32, 32))
+    assert output.shape == (1, 100)
+    assert torch.isfinite(output).all()
+
+
+def test_stage_mams_router_shares_probabilities_but_keeps_consumer_values():
+    router = CartesianStageMAMSRouting2d(
+        8,
+        12,
+        consumers=2,
+        diameters=(9, 5),
+        stride=2,
+        directions=4,
+        global_directions=8,
+        prototype_chunk_size=3,
+    )
+    image = torch.randn(2, 8, 16, 16, requires_grad=True)
+    output = router(image)
+    assert output.shape == (2, 2, 12, 8, 8)
+    assert router.prototype.shape == (6, 8, 40)
+    assert router.direction_value.shape == (2, 6, 2, 2)
+    assert router.scale_value.shape == (2, 6, 2, 2)
+    assert not torch.equal(output[0], output[1])
+    output.square().mean().backward()
+    for gradient in (
+        image.grad,
+        router.prototype.grad,
+        router.null_score.grad,
+        router.direction_value.grad,
+        router.scale_value.grad,
+    ):
+        assert gradient is not None
+        assert torch.isfinite(gradient).all()
+
+
+def test_resnet18_stage_mams_keeps_standard_blocks_and_large_stage_routes():
+    baseline = build_imagenet100_model(
+        variant="resnet18",
+        model_name="resnet18",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+    )
+    model = build_imagenet100_model(
+        variant="resnet18_stage_mams",
+        model_name="resnet18_stage_mams_large_4d4r",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+        rot_directions=4,
+        rot_global_directions=8,
+        rot_angular_bins_per_radius=4,
+        rot_prototype_chunk_size=16,
+        rot_null_initial_score=0.0,
+    )
+    stages = [model.layer1, model.layer2, model.layer3, model.layer4]
+    assert all(isinstance(stage, StageRoutedMAMS) for stage in stages)
+    assert [
+        tuple(geometry.diameter for geometry in stage.router.geometries)
+        for stage in stages
+    ] == [(9, 5), (9, 5), (7, 3), (5, 3)]
+    assert all(len(stage.blocks) == 2 for stage in stages)
+    assert all(stage.router.consumers == 2 for stage in stages)
+    assert all(stage.router.route_channels == 32 for stage in stages)
+    assert [stage.router.stride for stage in stages] == [4, 4, 2, 2]
+    parameters = sum(parameter.numel() for parameter in model.parameters())
+    baseline_parameters = sum(
+        parameter.numel() for parameter in baseline.parameters()
+    )
+    assert baseline_parameters < parameters < baseline_parameters * 1.1
 
     model.eval()
     with torch.inference_mode():

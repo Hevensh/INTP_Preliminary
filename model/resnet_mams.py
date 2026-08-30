@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.models import resnet18
 
 from layers.cartesian_rotating_harmonic_conv import CartesianRotatingHarmonicConv2d
@@ -11,6 +12,7 @@ from layers.cartesian_four_value_paired_mams import (
     ComplexPointwiseConv2d,
     PairedRMSNorm2d,
 )
+from layers.cartesian_stage_mams import CartesianStageMAMSRouting2d
 
 
 class MAMSBasicBlock(nn.Module):
@@ -209,4 +211,113 @@ def build_resnet18_mams_fourv_paired(
         PairedRMSNorm2d(512),
         nn.AdaptiveAvgPool2d((1, 1)),
     )
+    return model
+
+
+class StageRoutedMAMS(nn.Module):
+    """A standard ResNet stage augmented by one shared large-support router."""
+
+    def __init__(
+        self,
+        stage: nn.Sequential,
+        *,
+        diameters: tuple[int, ...],
+        directions: int,
+        global_directions: int,
+        angular_bins_per_radius: int,
+        prototype_chunk_size: int,
+        null_initial_score: float,
+        route_channels: int = 32,
+        route_stride: int | None = None,
+    ) -> None:
+        super().__init__()
+        blocks = list(stage.children())
+        if not blocks:
+            raise ValueError("a routed ResNet stage cannot be empty")
+        self.blocks = nn.ModuleList(blocks)
+        in_channels = blocks[0].conv1.in_channels
+        out_channels = blocks[0].conv2.out_channels
+        stride = blocks[0].stride
+        if route_stride is None:
+            route_stride = stride
+        self.router = CartesianStageMAMSRouting2d(
+            in_channels,
+            route_channels,
+            consumers=len(blocks),
+            diameters=diameters,
+            stride=route_stride,
+            directions=directions,
+            global_directions=global_directions,
+            angular_bins_per_radius=angular_bins_per_radius,
+            prototype_chunk_size=prototype_chunk_size,
+            null_initial_score=null_initial_score,
+        )
+        self.projections = nn.ModuleList(
+            nn.Identity()
+            if route_channels == out_channels
+            else nn.Conv2d(route_channels, out_channels, kernel_size=1, bias=False)
+            for _ in blocks
+        )
+        self.gate = nn.Parameter(torch.full((len(blocks), out_channels), 0.1))
+        self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        routed = self.router(x)
+        out = x
+        for index, (block, projection) in enumerate(
+            zip(self.blocks, self.projections, strict=True)
+        ):
+            out = block(out)
+            correction = projection(routed[index])
+            if correction.shape[-2:] != out.shape[-2:]:
+                correction = F.interpolate(
+                    correction,
+                    size=out.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            gate = self.gate[index][None, :, None, None].to(correction.dtype)
+            out = self.relu(out + correction * gate)
+        return out
+
+
+def build_resnet18_stage_mams(
+    *,
+    num_classes: int,
+    stage_diameters: tuple[tuple[int, ...], ...] = (
+        (9, 5),
+        (9, 5),
+        (7, 3),
+        (5, 3),
+    ),
+    route_strides: tuple[int, ...] = (4, 4, 2, 2),
+    directions: int = 4,
+    global_directions: int = 8,
+    angular_bins_per_radius: int = 4,
+    prototype_chunk_size: int = 16,
+    null_initial_score: float = 0.0,
+    route_channels: int = 32,
+) -> nn.Module:
+    """Add one reusable large-support geometry route to every ResNet stage."""
+
+    if len(stage_diameters) != 4 or len(route_strides) != 4:
+        raise ValueError("ResNet-18 requires four stage geometry specifications")
+    model = resnet18(weights=None, num_classes=num_classes)
+    for index, diameters in enumerate(stage_diameters, start=1):
+        stage_name = f"layer{index}"
+        setattr(
+            model,
+            stage_name,
+            StageRoutedMAMS(
+                getattr(model, stage_name),
+                diameters=diameters,
+                directions=directions,
+                global_directions=global_directions,
+                angular_bins_per_radius=angular_bins_per_radius,
+                prototype_chunk_size=prototype_chunk_size,
+                null_initial_score=null_initial_score,
+                route_channels=route_channels,
+                route_stride=route_strides[index - 1],
+            ),
+        )
     return model

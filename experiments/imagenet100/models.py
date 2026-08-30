@@ -18,7 +18,11 @@ from model.resnet_geometric_baselines import (
     build_resnet18_multiscale_rotconv,
     build_resnet18_rotconv,
 )
-from model.resnet_mams import build_resnet18_mams, build_resnet18_mams_fourv_paired
+from model.resnet_mams import (
+    build_resnet18_mams,
+    build_resnet18_mams_fourv_paired,
+    build_resnet18_stage_mams,
+)
 
 
 MODEL_VARIANTS = {
@@ -26,6 +30,7 @@ MODEL_VARIANTS = {
     "resnet18_multiscale_rotconv4", "resnet18_mams",
     "resnet18_mixconv4", "resnet18_fixed_rotinterp8", "resnet18_arc4bank",
     "resnet18_mams_fourv_paired",
+    "resnet18_stage_mams",
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
@@ -125,6 +130,17 @@ def build_imagenet100_model(
         return build_resnet18_mams_fourv_paired(
             num_classes=num_classes,
             diameters=(int(rot_kernel_sizes[0]), int(rot_kernel_sizes[1])),
+            directions=rot_directions,
+            global_directions=rot_global_directions,
+            angular_bins_per_radius=rot_angular_bins_per_radius,
+            prototype_chunk_size=rot_prototype_chunk_size,
+            null_initial_score=rot_null_initial_score,
+        )
+    if variant == "resnet18_stage_mams":
+        if pretrained:
+            raise ValueError("the stage-routed MAMS comparison is trained from scratch")
+        return build_resnet18_stage_mams(
+            num_classes=num_classes,
             directions=rot_directions,
             global_directions=rot_global_directions,
             angular_bins_per_radius=rot_angular_bins_per_radius,
