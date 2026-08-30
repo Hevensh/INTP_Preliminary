@@ -11,7 +11,6 @@ from layers.cartesian_four_value_paired_mams import (
     CartesianFourValuePairedMAMSConv2d,
     ComplexPointwiseConv2d,
     PairedRMSNorm2d,
-    _SharedWindowPatchExtractor,
 )
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
 from layers.triton_polar_renderer import triton_polar_render
@@ -108,17 +107,6 @@ def _rotate_pairs(x: torch.Tensor, angle: float) -> torch.Tensor:
     real = pair[:, :, 0] * cosine - pair[:, :, 1] * sine
     imag = pair[:, :, 0] * sine + pair[:, :, 1] * cosine
     return torch.stack((real, imag), dim=2).reshape_as(x)
-
-
-def test_shared_window_extractor_is_identical_to_old_geometry():
-    geometries = torch.nn.ModuleList([
-        CartesianCircularPatchGeometry(8, diameter=6, stride=2),
-        CartesianCircularPatchGeometry(8, diameter=3, stride=2),
-    ])
-    image = torch.randn(2, 8, 16, 16)
-    shared = _SharedWindowPatchExtractor(geometries)(image)
-    for actual, geometry in zip(shared, geometries, strict=True):
-        torch.testing.assert_close(actual, geometry(image))
 
 
 def test_paired_norm_and_complex_shortcut_commute_with_rotation():

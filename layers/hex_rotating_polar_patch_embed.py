@@ -44,6 +44,41 @@ class _PolarRenderer(nn.Module):
         i10, i11, a1_fraction = angular_indices(r1)
         cover = torch.cos(radius * math.pi / kernel_size).clamp_min(0)
 
+        # Reverse interpolation map used by the fused CUDA backward. Each
+        # compact polar value owns a short list of rendered samples instead of
+        # receiving many contended atomic additions on older GPUs such as T4.
+        radial_fraction = radial - r0
+        reverse_bin = torch.stack((i00, i01, i10, i11), dim=-1).reshape(-1, 4)
+        reverse_weight = torch.stack(
+            (
+                (1 - radial_fraction)[None] * (1 - a0_fraction),
+                (1 - radial_fraction)[None] * a0_fraction,
+                radial_fraction[None] * (1 - a1_fraction),
+                radial_fraction[None] * a1_fraction,
+            ),
+            dim=-1,
+        ).reshape(-1, 4)
+        rendered_lookup = torch.arange(
+            directions * geometry.patch_offsets_xy.shape[0], dtype=torch.long
+        )[:, None].expand(-1, 4)
+        compact_values = int(ring_offsets[-1])
+        counts_per_value = torch.bincount(
+            reverse_bin.flatten(), minlength=compact_values
+        )
+        max_contributions = int(counts_per_value.max())
+        reverse_lookup = torch.full(
+            (compact_values, max_contributions), -1, dtype=torch.long
+        )
+        reverse_weights = torch.zeros(
+            compact_values, max_contributions, dtype=torch.float32
+        )
+        for value_index in range(compact_values):
+            matches = reverse_bin == value_index
+            lookups = rendered_lookup[matches]
+            weights = reverse_weight[matches]
+            reverse_lookup[value_index, : lookups.numel()] = lookups
+            reverse_weights[value_index, : weights.numel()] = weights
+
         self.register_buffer("index_r0_a0", i00, persistent=False)
         self.register_buffer("index_r0_a1", i01, persistent=False)
         self.register_buffer("index_r1_a0", i10, persistent=False)
@@ -51,6 +86,8 @@ class _PolarRenderer(nn.Module):
         self.register_buffer("angle_fraction_r0", a0_fraction, persistent=False)
         self.register_buffer("angle_fraction_r1", a1_fraction, persistent=False)
         self.register_buffer("radial_fraction", radial - r0, persistent=False)
+        self.register_buffer("reverse_lookup", reverse_lookup, persistent=False)
+        self.register_buffer("reverse_weight", reverse_weights, persistent=False)
         self.register_buffer("support_cover", cover, persistent=False)
         n_in = float(geometry.in_chans * cover.sum())
         self.distance_multiplier = 1.0 / (

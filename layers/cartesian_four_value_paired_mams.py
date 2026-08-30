@@ -95,46 +95,6 @@ class ComplexPointwiseConv2d(nn.Module):
         return out.flatten(1, 2)
 
 
-class _SharedWindowPatchExtractor(nn.Module):
-    """Gather all circular scales from one strided window view.
-
-    ``Tensor.unfold`` creates a view. Only the requested circular samples are
-    materialized, avoiding the full KxK matrices produced by ``F.unfold`` and
-    avoiding a second extraction for the smaller scale.
-    """
-
-    def __init__(self, geometries: nn.ModuleList) -> None:
-        super().__init__()
-        if not geometries:
-            raise ValueError("at least one geometry is required")
-        self.stride = int(geometries[0].stride)
-        self.padding = max(int(geometry.padding) for geometry in geometries)
-        self.window_size = 2 * self.padding + 1
-        for index, geometry in enumerate(geometries):
-            offsets = geometry.patch_offsets_xy.round().long()
-            x_index = offsets[:, 0] + self.padding
-            y_index = offsets[:, 1] + self.padding
-            self.register_buffer(f"scale_x_{index}", x_index, persistent=False)
-            self.register_buffer(f"scale_y_{index}", y_index, persistent=False)
-        self.scales = len(geometries)
-
-    def forward(self, image: torch.Tensor) -> list[torch.Tensor]:
-        if self.padding:
-            mode = "reflect" if min(image.shape[-2:]) > self.padding else "replicate"
-            image = F.pad(image, (self.padding,) * 4, mode=mode)
-        windows = image.unfold(2, self.window_size, self.stride).unfold(
-            3, self.window_size, self.stride
-        )
-        patches = []
-        for index in range(self.scales):
-            x_index = getattr(self, f"scale_x_{index}")
-            y_index = getattr(self, f"scale_y_{index}")
-            patch = windows[..., y_index, x_index]
-            patch = patch.permute(0, 2, 3, 1, 4).flatten(1, 2).contiguous()
-            patches.append(patch)
-        return patches
-
-
 class CartesianFourValuePairedMAMSConv2d(nn.Module):
     """Four-value A/B/Vscale MAMS with optional paired input prototypes.
 
@@ -181,7 +141,6 @@ class CartesianFourValuePairedMAMSConv2d(nn.Module):
             CartesianCircularPatchGeometry(in_channels, int(diameter), stride)
             for diameter in diameters
         )
-        self.patch_extractor = _SharedWindowPatchExtractor(self.geometries)
         radial_bins = max(diameters) // 2
         counts = torch.tensor(
             [angular_bins_per_radius * (radius + 1) for radius in range(radial_bins)],
@@ -300,7 +259,10 @@ class CartesianFourValuePairedMAMSConv2d(nn.Module):
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         height, width = image.shape[-2:]
         output_size = self.geometries[0].output_size(height, width)
-        raw_patches = self.patch_extractor(image)
+        # F.unfold materializes two compact scale tensors, but its col2im
+        # backward is substantially faster on T4 than the advanced-index
+        # backward of a shared strided window view.
+        raw_patches = [geometry(image) for geometry in self.geometries]
         patches = []
         for index, patch in enumerate(raw_patches):
             cover = getattr(self, f"scale_cover_{index}").to(patch.dtype)
