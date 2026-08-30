@@ -17,7 +17,7 @@ if [[ -f "${RUN_DIR}/last.pt" ]]; then
   RESUME_ARGS=(--resume "${RUN_DIR}/last.pt")
 fi
 
-echo "[run] 5 epochs | Hex half6d3r + null-softmax | PE + Look + deep C6/C12 rings | batch ${BATCH_SIZE}/GPU"
+echo "[run] 5 epochs | Hex half6d3r + null-softmax | PE + Look + deep C6 local steering | batch ${BATCH_SIZE}/GPU"
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
   -m experiments.imagenet100.train_vit \
   --config configs/imagenet100/deit_tiny_rot_hex_harmonic_softmax_pe_look_ring_half6_compact_r3_ddp_e5.json \

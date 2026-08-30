@@ -127,7 +127,7 @@ class DeiTTinyRotHexLook(nn.Module):
         if self.feature_ring_look:
             if global_directions != 12:
                 raise ValueError(
-                    "two-ring feature Look requires a full 12-direction Look period"
+                    "C6 feature Look requires a full 12-direction Look field"
                 )
             self.feature_ring_matcher = TwoRingCircularLookMatcher(
                 coordinates=patch_coordinates,

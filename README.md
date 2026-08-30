@@ -66,20 +66,14 @@ radial resolution is twice the number of tokenizer scales. For example, the
 current `half6d3r` tokenizer uses a `12 direction x 4 radius` Look field.
 
 An experimental deep-feature refinement keeps the original image-derived Look
-path and augments all twelve Transformer blocks by default.  For every query token
-it reads the exact first and second Hex graph rings, correlates the six inner
-neighbors over C6 and the twelve outer neighbors over C12, and ignores the
-center token.  Each layer/head stores only 6 + 12 shared `head_dim -> 1`
-projections. Their paired feature weights use polar `(radius, phase)` storage,
-so rotating a candidate both circularly shifts its spatial positions and adds
-the same angle to its feature-pair phases; each position still owns exactly
-`head_dim` parameters. Inner and outer responses share one learned canonical
-`4 radius x 12 direction` dense Look map, matching the image-derived path: C6
-uses its small-scale transform and C12 uses its large-scale transform. The map
-rotates with the detected pose and is appended to the original image-derived
-Look terms. Ring rotation is evaluated as exact complex circular correlation;
-its spectrum is multiplied directly by the canonical Look spectrum, avoiding
-explicit rotated banks and the pose-space IFFT-to-FFT round trip.
+path and augments all twelve Transformer blocks by default. For every query it
+reads only the first Hex graph ring and correlates its six neighbors over C6.
+Each layer/head stores six shared `head_dim -> 1` projections in polar
+`(radius, phase)` form, so rotating a candidate synchronizes spatial shifts and
+feature-pair rotation. The resulting local pose evidence rotates one learned
+canonical `4 radius x 12 direction` map: a cheap one-ring detector therefore
+decides which parts of the full four-ring attention field should be emphasized.
+No C12 detector, second feature scale, or short-ring FFT is evaluated.
 
 ## Main experiment configurations
 

@@ -25,11 +25,16 @@ def _build(variant: str):
     )
 
 
-def test_two_ring_matcher_stores_only_c6_and_c12_banks():
+def _coordinates():
     base = _build("rot_hex_harmonic_pe_look")
-    coordinates = torch.stack(
-        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
+    return torch.stack(
+        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag),
+        dim=-1,
     )
+
+
+def test_feature_ring_stores_only_one_c6_probe_and_one_full_look_field():
+    coordinates = _coordinates()
     matcher = TwoRingCircularLookMatcher(
         coordinates=coordinates,
         depth=2,
@@ -37,38 +42,21 @@ def test_two_ring_matcher_stores_only_c6_and_c12_banks():
         head_dim=64,
         start_layer=1,
     )
-    assert matcher.inner_radius.shape == (1, 3, 6, 32)
-    assert matcher.inner_phase.shape == (1, 3, 6, 32)
-    assert matcher.outer_radius.shape == (1, 3, 12, 32)
-    assert matcher.outer_phase.shape == (1, 3, 12, 32)
-    assert (
-        matcher.inner_radius[0, 0].numel()
-        + matcher.inner_phase[0, 0].numel()
-    ) == 6 * 64
-    assert (
-        matcher.outer_radius[0, 0].numel()
-        + matcher.outer_phase[0, 0].numel()
-    ) == 12 * 64
-    assert matcher.inner_relative.shape == (6, 6)
-    assert matcher.outer_relative.shape == (12, 12)
+    assert matcher.radius.shape == (1, 3, 6, 32)
+    assert matcher.phase.shape == (1, 3, 6, 32)
+    assert matcher.radius[0, 0].numel() + matcher.phase[0, 0].numel() == 6 * 64
+    assert matcher.relative.shape == (6, 6)
     assert matcher.look_grid.shape == (1, 3, 4, 12)
     assert matcher.look_radial0.shape == (
-        2, coordinates.shape[0], coordinates.shape[0]
+        coordinates.shape[0], coordinates.shape[0]
     )
-    # The two graph rings are two transformed supports of one canonical map:
-    # C12 uses the larger support and C6 the contracted support.
-    assert matcher.look_valid[0].sum() > matcher.look_valid[1].sum()
-    assert not hasattr(matcher, "inner_look_grid")
-    assert not hasattr(matcher, "outer_look_grid")
-    assert (matcher.inner_valid.sum(dim=1) == 6).any()
-    assert (matcher.outer_valid.sum(dim=1) == 12).any()
+    assert (matcher.valid.sum(dim=1) == 6).any()
+    assert not hasattr(matcher, "outer_neighbors")
+    assert not hasattr(matcher, "outer_radius")
 
 
-def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
-    base = _build("rot_hex_harmonic_pe_look")
-    coordinates = torch.stack(
-        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
-    )
+def test_c6_probe_outputs_centered_coefficients_and_gradients():
+    coordinates = _coordinates()
     matcher = TwoRingCircularLookMatcher(
         coordinates=coordinates,
         depth=1,
@@ -79,97 +67,29 @@ def test_two_ring_matcher_outputs_centered_coefficients_and_gradients():
     with torch.no_grad():
         matcher.gate.fill_(0.1)
     features = torch.randn(2, coordinates.shape[0], 192, requires_grad=True)
-    inner, outer = matcher(features, layer_index=0)
-    assert inner.shape == (2, coordinates.shape[0], 3, 6)
-    assert outer.shape == (2, coordinates.shape[0], 3, 12)
-    dense_bias = matcher.dense_look_bias(inner, outer, layer_index=0)
-    combined_bias = matcher.dense_look_bias_from_features(
-        features, layer_index=0
-    )
+    scores = matcher(features, layer_index=0)
+    dense_bias = matcher.dense_look_bias(scores, layer_index=0)
+    combined_bias = matcher.dense_look_bias_from_features(features, layer_index=0)
+    assert scores.shape == (2, coordinates.shape[0], 3, 6)
     assert dense_bias.shape == (
         2, 3, coordinates.shape[0], coordinates.shape[0]
     )
-    torch.testing.assert_close(combined_bias, dense_bias, rtol=2e-5, atol=2e-5)
-    torch.testing.assert_close(inner.mean(dim=-1), torch.zeros_like(inner[..., 0]))
-    torch.testing.assert_close(outer.mean(dim=-1), torch.zeros_like(outer[..., 0]))
-    loss = inner.square().mean() + outer.square().mean()
-    loss = loss + combined_bias.square().mean()
-    loss.backward()
-    assert torch.isfinite(features.grad).all()
-    assert torch.isfinite(matcher.inner_radius.grad).all()
-    assert torch.isfinite(matcher.inner_phase.grad).all()
-    assert torch.isfinite(matcher.outer_radius.grad).all()
-    assert torch.isfinite(matcher.outer_phase.grad).all()
-    assert torch.isfinite(matcher.look_grid.grad).all()
-
-
-def test_frequency_ring_correlation_matches_explicit_rotated_banks():
-    base = _build("rot_hex_harmonic_pe_look")
-    coordinates = torch.stack(
-        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
-    )
-    matcher = TwoRingCircularLookMatcher(
-        coordinates=coordinates,
-        depth=1,
-        num_heads=3,
-        head_dim=64,
-        start_layer=0,
-    )
-    with torch.no_grad():
-        matcher.gate.fill_(1.0)
-    features = torch.randn(2, coordinates.shape[0], 192)
-    actual_inner, actual_outer = matcher(features, layer_index=0)
-    heads = features.reshape(2, coordinates.shape[0], 3, 64)
-
-    def explicit(
-        neighbors,
-        valid,
-        radius,
-        phase,
-        relative,
-        candidate_angle,
+    torch.testing.assert_close(combined_bias, dense_bias)
+    torch.testing.assert_close(scores.mean(dim=-1), torch.zeros_like(scores[..., 0]))
+    (scores.square().mean() + combined_bias.square().mean()).backward()
+    for gradient in (
+        features.grad,
+        matcher.radius.grad,
+        matcher.phase.grad,
+        matcher.look_grid.grad,
+        matcher.gate.grad,
     ):
-        sentinel = coordinates.shape[0]
-        padded = torch.cat((heads, heads.new_zeros(2, 1, 3, 64)), dim=1)
-        indices = torch.where(
-            valid,
-            neighbors.clamp_min(0),
-            torch.full_like(neighbors, sentinel),
-        )
-        edge = padded[:, indices]
-        weight = matcher._render_polar_weight(
-            radius, phase, relative, candidate_angle
-        )
-        score = torch.einsum("bqphc,htpc->bqht", edge, weight)
-        count = valid.sum(dim=-1).clamp_min(1).to(score.dtype)
-        score = score / torch.sqrt(count[None, :, None, None])
-        return score - score.mean(dim=-1, keepdim=True)
-
-    expected_inner = explicit(
-        matcher.inner_neighbors,
-        matcher.inner_valid,
-        matcher.inner_radius[0],
-        matcher.inner_phase[0],
-        matcher.inner_relative,
-        matcher.inner_candidate_angle,
-    )
-    expected_outer = explicit(
-        matcher.outer_neighbors,
-        matcher.outer_valid,
-        matcher.outer_radius[0],
-        matcher.outer_phase[0],
-        matcher.outer_relative,
-        matcher.outer_candidate_angle,
-    )
-    torch.testing.assert_close(actual_inner, expected_inner, rtol=2e-5, atol=2e-5)
-    torch.testing.assert_close(actual_outer, expected_outer, rtol=2e-5, atol=2e-5)
+        assert gradient is not None
+        assert torch.isfinite(gradient).all()
 
 
 def test_spatial_and_paired_weight_rotation_are_synchronized():
-    base = _build("rot_hex_harmonic_pe_look")
-    coordinates = torch.stack(
-        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
-    )
+    coordinates = _coordinates()
     matcher = TwoRingCircularLookMatcher(
         coordinates=coordinates,
         depth=1,
@@ -178,14 +98,14 @@ def test_spatial_and_paired_weight_rotation_are_synchronized():
         start_layer=0,
     )
     rendered = matcher._render_polar_weight(
-        matcher.outer_radius[0],
-        matcher.outer_phase[0],
-        matcher.outer_relative,
-        matcher.outer_candidate_angle,
+        matcher.radius[0],
+        matcher.phase[0],
+        matcher.relative,
+        matcher.candidate_angle,
     )
-    step = 2.0 * torch.pi / 12.0
+    step = 2.0 * torch.pi / 6.0
     spatially_rotated = torch.roll(rendered[:, 0], shifts=1, dims=1)
-    paired = spatially_rotated.reshape(3, 12, 32, 2)
+    paired = spatially_rotated.reshape(3, 6, 32, 2)
     cosine, sine = math.cos(step), math.sin(step)
     expected = torch.stack(
         (
@@ -197,11 +117,8 @@ def test_spatial_and_paired_weight_rotation_are_synchronized():
     torch.testing.assert_close(rendered[:, 1], expected)
 
 
-def test_ring_scales_match_original_shared_look_grid_transforms():
-    base = _build("rot_hex_harmonic_pe_look")
-    coordinates = torch.stack(
-        (base.patch_embed.coo_patchs.real, base.patch_embed.coo_patchs.imag), dim=-1
-    )
+def test_c6_pose_steers_the_original_full_four_ring_look_transform():
+    coordinates = _coordinates()
     matcher = TwoRingCircularLookMatcher(
         coordinates=coordinates,
         depth=1,
@@ -214,9 +131,9 @@ def test_ring_scales_match_original_shared_look_grid_transforms():
         patch_size=16,
         num_heads=3,
         prototype_angular_bins=24,
-        source_directions=12,
-        source_direction_period=12,
-        scales=(1.0, 0.5),
+        source_directions=6,
+        source_direction_period=6,
+        scales=(1.0,),
         prototype_radius=12.0,
         look_direction_bins=12,
         look_radial_bins=4,
@@ -229,24 +146,12 @@ def test_ring_scales_match_original_shared_look_grid_transforms():
         matcher.look_grid[0].copy_(canonical)
         reference.look_grid.copy_(canonical)
     fields = reference.transformed_look_grids()
-    patches = coordinates.shape[0]
-
-    # C12 direction 3 is the large-scale transform at 90 degrees.
-    inner = torch.zeros(1, patches, 3, 6)
-    outer = torch.zeros(1, patches, 3, 12)
-    outer[..., 3] = 1.0
-    actual_large = matcher.dense_look_bias(inner, outer, layer_index=0)
-    expected_large = fields[:, 0, 3].unsqueeze(0)
-    torch.testing.assert_close(actual_large, expected_large)
-
-    # C6 direction 2 is 120 degrees, i.e. full-period direction index 4,
-    # while using the contracted 0.5-scale support of the same table.
-    inner.zero_()
-    outer.zero_()
-    inner[..., 2] = 1.0
-    actual_small = matcher.dense_look_bias(inner, outer, layer_index=0)
-    expected_small = fields[:, 1, 4].unsqueeze(0)
-    torch.testing.assert_close(actual_small, expected_small)
+    scores = torch.zeros(1, coordinates.shape[0], 3, 6)
+    scores[..., 2] = 1.0
+    actual = matcher.dense_look_bias(scores, layer_index=0)
+    expected = fields[:, 0, 2].unsqueeze(0)
+    torch.testing.assert_close(actual, expected)
+    assert matcher.look_valid.sum() == reference.look_valid[0, 0].sum()
 
 
 def test_zero_gated_ring_variant_matches_existing_pe_look_model():
