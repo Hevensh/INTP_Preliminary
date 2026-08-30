@@ -47,8 +47,48 @@ def test_center_pose_model_uses_six_axes_without_image_look_bank():
     assert model.center_look.axes == 6
     assert model.center_look.pairs_per_head == 32
     assert model.center_look.angular_fields.shape == (6, 195, 195)
-    assert model.center_look.layer_axis_gain.shape == (12, 3, 6)
+    assert model.center_look.layer_axis_gain.shape == (11, 3, 6)
     assert model.look_radial_bins == 4  # tokenizer metadata remains unchanged
     diagnostics = model.experiment_diagnostics()["center_pose_angular_look"]
     assert diagnostics["directed_angles"] == 12
-    assert len(diagnostics["layer_mean_abs_gain"]) == 12
+    assert len(diagnostics["layer_mean_abs_gain"]) == 11
+
+
+def test_combined_image_and_center_look_concatenates_structured_bases():
+    model = build_imagenet100_model(
+        variant="rot_hex_harmonic_pe_look_center_look",
+        model_name="deit_tiny_patch16_224",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+        hex_stride=18,
+        rot_kernel_sizes=(24, 12),
+        rot_bases=96,
+        rot_directions=6,
+        rot_global_directions=12,
+        rot_angular_bins_per_radius=3,
+        look_compact_variable_rings=True,
+        rot_prototype_chunk_size=16,
+        rot_null_initial_score=0.0,
+    )
+    assert model.look_bank is not None
+    assert model.center_look is not None
+    assert model.image_look
+    assert model.center_look.layer_axis_gain.shape == (11, 3, 6)
+
+
+def test_center_look_only_variant_has_no_pe_or_image_look():
+    model = build_imagenet100_model(
+        variant="rot_hex_harmonic_center_look",
+        model_name="deit_tiny_patch16_224",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+        rot_directions=6,
+        rot_global_directions=12,
+        rot_angular_bins_per_radius=3,
+        look_compact_variable_rings=True,
+    )
+    assert model.pos_embed is None
+    assert model.look_bank is None
+    assert model.center_look is not None

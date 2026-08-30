@@ -33,6 +33,7 @@ class DeiTTinyRotHexLook(nn.Module):
         global_directions: int = 8,
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
+        image_look: bool = True,
         center_pose_look: bool = False,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
@@ -95,13 +96,18 @@ class DeiTTinyRotHexLook(nn.Module):
         self.center_pose_look = bool(center_pose_look)
         if self.center_pose_look and feature_ring_look:
             raise ValueError("center-pose Look and feature-ring Look are exclusive")
+        self.image_look = bool(image_look)
+        if not self.image_look and not self.center_pose_look:
+            raise ValueError("at least one Look branch must be enabled")
+        if feature_ring_look and not self.image_look:
+            raise ValueError("feature-ring Look requires the image Look branch")
         # Keep the Look lattice structurally coupled to the tokenizer instead
         # of silently retaining an 8 x 4 field when the geometric pose search
         # changes.  A half-6 / full-12 tokenizer therefore uses 12 x 4, while
         # the established half-4 / full-8 tokenizer remains 8 x 4.
         self.look_direction_bins = int(global_directions)
         self.look_radial_bins = 2 * len(kernel_sizes)
-        self.look_bank = None if self.center_pose_look else SquarePatchDenseGridLook(
+        self.look_bank = SquarePatchDenseGridLook(
             image_size=image_size,
             patch_size=16,
             in_channels=3,
@@ -129,13 +135,16 @@ class DeiTTinyRotHexLook(nn.Module):
             compact_lattice_stride=(
                 lattice_stride if look_compact_variable_rings else None
             ),
-        )
+        ) if self.image_look else None
         if self.center_pose_look:
+            # Patch-to-patch bias in the final block cannot affect that same
+            # block's CLS output.  Keep Center Look on the first 11 blocks;
+            # the image Look branch, when present, still spans all 12.
             self.center_look = CenterPoseAngularLook(
                 coordinates=patch_coordinates,
                 embed_dim=self.embed_dim,
                 num_heads=self.num_heads,
-                depth=self.depth,
+                depth=self.depth - 1,
                 axes=directions,
                 null_initial_score=tokenizer_null_initial_score,
                 gate_init=0.0,
@@ -199,16 +208,26 @@ class DeiTTinyRotHexLook(nn.Module):
             pose_weights = fields = None
         stage_ring_biases = None
         for layer_index, block in enumerate(self.blocks):
-            if self.center_look is not None:
-                layer_pose = shared_pose
-                layer_fields = self.center_look.fields(
-                    layer_index, dtype=tokens.dtype
-                )
-            else:
+            layer_pose = layer_fields = None
+            if self.look_bank is not None:
                 start = layer_index * self.num_heads
                 stop = start + self.num_heads
                 layer_pose = pose_weights[:, :, start:stop]
                 layer_fields = fields[start:stop]
+            if self.center_look is not None and layer_index < self.center_look.depth:
+                center_fields = self.center_look.fields(
+                    layer_index, dtype=tokens.dtype
+                )
+                if layer_pose is None:
+                    layer_pose = shared_pose
+                    layer_fields = center_fields
+                else:
+                    # Structured attention is linear in the Look terms.  By
+                    # concatenating the two pose bases, one Triton call adds
+                    # image Look and Center Look exactly, without a dense bias
+                    # tensor or a separate branch gate.
+                    layer_pose = torch.cat((layer_pose, shared_pose), dim=-1)
+                    layer_fields = torch.cat((layer_fields, center_fields), dim=1)
             norm1_input = None
             if (
                 self.feature_ring_matcher is not None
@@ -235,11 +254,12 @@ class DeiTTinyRotHexLook(nn.Module):
                 dense_ring_bias = stage_ring_biases[stage_offset]
             else:
                 dense_ring_bias = None
-            tokens = block(
-                tokens,
-                structured_look=(layer_pose, layer_fields, dense_ring_bias),
-                norm1_input=norm1_input,
-            )
+            structured_look = None
+            if layer_pose is not None:
+                structured_look = (layer_pose, layer_fields, dense_ring_bias)
+            elif dense_ring_bias is not None:
+                raise RuntimeError("dense ring bias requires a structured Look branch")
+            tokens = block(tokens, structured_look=structured_look, norm1_input=norm1_input)
         return self.norm(tokens)
 
     def experiment_diagnostics(self) -> dict[str, object]:

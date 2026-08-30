@@ -41,7 +41,8 @@ MODEL_VARIANTS = {
     "rot_hex_dot_grouped_compensated_pe",
     "rot_hex_harmonic_look", "rot_hex_harmonic_pe_look",
     "rot_hex_harmonic_look_ring", "rot_hex_harmonic_pe_look_ring",
-    "rot_hex_harmonic_pe_center_look",
+    "rot_hex_harmonic_center_look", "rot_hex_harmonic_pe_center_look",
+    "rot_hex_harmonic_pe_look_center_look",
 }
 
 
@@ -165,7 +166,9 @@ def build_imagenet100_model(
         "rot_hex_harmonic_pe_look",
         "rot_hex_harmonic_look_ring",
         "rot_hex_harmonic_pe_look_ring",
+        "rot_hex_harmonic_center_look",
         "rot_hex_harmonic_pe_center_look",
+        "rot_hex_harmonic_pe_look_center_look",
     }:
         return DeiTTinyRotHexLook(
             num_classes=num_classes,
@@ -174,6 +177,7 @@ def build_imagenet100_model(
                 "rot_hex_harmonic_pe_look",
                 "rot_hex_harmonic_pe_look_ring",
                 "rot_hex_harmonic_pe_center_look",
+                "rot_hex_harmonic_pe_look_center_look",
             },
             lattice_stride=hex_stride,
             kernel_sizes=rot_kernel_sizes,
@@ -182,7 +186,15 @@ def build_imagenet100_model(
             global_directions=rot_global_directions,
             angular_bins_per_radius=rot_angular_bins_per_radius,
             look_compact_variable_rings=look_compact_variable_rings,
-            center_pose_look=variant == "rot_hex_harmonic_pe_center_look",
+            image_look=variant not in {
+                "rot_hex_harmonic_center_look",
+                "rot_hex_harmonic_pe_center_look",
+            },
+            center_pose_look=variant in {
+                "rot_hex_harmonic_center_look",
+                "rot_hex_harmonic_pe_center_look",
+                "rot_hex_harmonic_pe_look_center_look",
+            },
             feature_ring_look=(
                 feature_ring_look
                 or variant in {
