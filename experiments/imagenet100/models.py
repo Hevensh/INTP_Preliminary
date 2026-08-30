@@ -11,6 +11,9 @@ from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPat
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
 from model.resnet_geometric_baselines import (
+    build_resnet18_arc4bank,
+    build_resnet18_fixed_rotinterp8,
+    build_resnet18_mixconv4,
     build_resnet18_multiscale,
     build_resnet18_multiscale_rotconv,
     build_resnet18_rotconv,
@@ -21,6 +24,7 @@ from model.resnet_mams import build_resnet18_mams, build_resnet18_mams_fourv_pai
 MODEL_VARIANTS = {
     "resnet18", "resnet18_multiscale", "resnet18_rotconv4",
     "resnet18_multiscale_rotconv4", "resnet18_mams",
+    "resnet18_mixconv4", "resnet18_fixed_rotinterp8", "resnet18_arc4bank",
     "resnet18_mams_fourv_paired",
     "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
@@ -64,12 +68,24 @@ def build_imagenet100_model(
             raise ValueError("the ResNet comparison is trained from scratch")
         return resnet18(weights=None, num_classes=num_classes)
     if variant in {
+        "resnet18_mixconv4",
+        "resnet18_fixed_rotinterp8",
+        "resnet18_arc4bank",
         "resnet18_multiscale",
         "resnet18_rotconv4",
         "resnet18_multiscale_rotconv4",
     }:
         if pretrained:
             raise ValueError("the ResNet comparison is trained from scratch")
+        if variant == "resnet18_mixconv4":
+            return build_resnet18_mixconv4(num_classes=num_classes)
+        if variant == "resnet18_fixed_rotinterp8":
+            return build_resnet18_fixed_rotinterp8(
+                num_classes=num_classes,
+                directions=8,
+            )
+        if variant == "resnet18_arc4bank":
+            return build_resnet18_arc4bank(num_classes=num_classes, kernel_number=4)
         if variant == "resnet18_multiscale":
             return build_resnet18_multiscale(num_classes=num_classes)
         if variant == "resnet18_rotconv4":

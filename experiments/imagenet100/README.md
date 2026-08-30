@@ -123,35 +123,41 @@ or resumed as the 20-epoch run.
 
 ### Controlled multi-scale and multi-angle comparisons
 
-Three whole-BasicBlock comparison variants use the same stem, residual
-shortcuts, stage widths, pooling, classifier, training config, and final 1x1
-mixing layer as the MAMS arm:
+The current literature-aligned small baselines keep torchvision's ResNet-18
+BasicBlock and replace only the first spatial convolution of every block.  The
+second 3x3 convolution, shortcut, stem, stage widths, pooling, classifier, and
+training recipe remain unchanged:
 
 | Variant | Spatial extractor before the 1x1 mixer | Pose retained? | Parameters |
 | --- | --- | ---: | ---: |
 | Standard ResNet-18 | two ordinary 3x3 convolutions | no | 11,227,812 |
-| Multi-scale | parallel learned 5x5 and 3x3 branches, concatenated | no | 9,851,556 |
-| RotConv-4 | one learned 5x5 bank, shared over 0/45/90/135 degrees, direction max | no | 14,045,860 |
-| Multi-scale RotConv-4 | independent 5x5/3x3 banks, each shared over four directions, direction max, concatenated | no | 9,851,556 |
-| MAMS | shared D6/D3 polar prototype, null-softmax and cos/sin projection | yes | 7,231,076 |
+| MixConv-4 | 1x1 projection, then channel-split depthwise 3/5/7/9 kernels | no | 7,112,228 |
+| Fixed RotInterp-8 | 1x1 projection, one shared depthwise 3x3 bank, eight fixed full-circle bilinear rotations, orientation max | no | 7,050,788 |
+| ARC-4bank | 1x1 projection, ARC routing head, four adaptive kernel banks combined before one depthwise convolution | input-adaptive | 7,139,140 |
 
-These are controlled functional baselines, not claims of exact reproduction of
-an Inception, ORN, or group-equivariant network. In particular, RotConv removes
-its explicit orientation axis with max pooling so it can enter an otherwise
-unchanged ResNet-18; MAMS instead projects that pose distribution into paired
-cos/sin channels.
+MixConv-4 follows the paper's mixed-depthwise construction. Fixed RotInterp-8
+is an ORN-style reduced baseline: it uses the paper's shared-kernel bilinear
+rotation idea but pools the orientation axis inside each replaced layer rather
+than carrying an ARF orientation field through the whole network. ARC-4bank follows
+the official routing sequence (depthwise 3x3, LayerNorm, ReLU, global average
+pooling, sigmoid kernel gates, and softsign angles bounded to +/-40 degrees),
+but uses depthwise adaptive kernels so ImageNet-100 batches remain practical.
+
+The earlier whole-block K5/K3 comparison variants remain in the repository for
+result provenance, but should be treated as legacy and not used as the paper
+baselines.
 
 Five-epoch smoke commands:
 
 ```bash
 DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
-  bash scripts/kaggle/run_imagenet100_resnet18_multiscale_2xt4.sh
+  bash scripts/kaggle/run_imagenet100_resnet18_mixconv4_2xt4.sh
 
 DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
-  bash scripts/kaggle/run_imagenet100_resnet18_rotconv4_2xt4.sh
+  bash scripts/kaggle/run_imagenet100_resnet18_fixed_rotinterp8_2xt4.sh
 
 DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
-  bash scripts/kaggle/run_imagenet100_resnet18_multiscale_rotconv4_2xt4.sh
+  bash scripts/kaggle/run_imagenet100_resnet18_arc4bank_2xt4.sh
 ```
 
 Use `EPOCHS=20` only after a variant passes the five-epoch convergence, runtime,
