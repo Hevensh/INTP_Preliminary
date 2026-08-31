@@ -29,6 +29,6 @@ run_share() {
     --batch-size "${BATCH_SIZE}" --epochs "${EPOCHS}" "${resume_args[@]}"
 }
 
-run_share 4
-run_share 6
+run_share 1
+run_share 2
 echo "[suite done] outputs: ${OUTPUT_ROOT}"
