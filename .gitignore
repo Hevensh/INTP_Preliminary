@@ -12,6 +12,9 @@ visualization/
 imgs/
 downloads/
 essay_docu/
+# Local extraction, rendering QA, and one-off scholarship figure helpers.
+tmp/
+scripts/figures/
 # Keep the experiment index in Git, but store downloaded run artifacts locally.
 runs/*
 !runs/README.md
