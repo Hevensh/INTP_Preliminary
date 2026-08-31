@@ -65,6 +65,7 @@ class TrainConfig:
     rot_global_directions: int = 8
     rot_angular_bins_per_radius: int = 4
     look_compact_variable_rings: bool = False
+    center_look_layers_per_probe: int = 1
     feature_ring_look: bool = False
     feature_ring_start_layer: int = 0
     feature_ring_group_size: int = 4
@@ -126,6 +127,8 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("hex_kernel_size and hex_stride must be positive")
     if config.rot_angular_bins_per_radius <= 0:
         raise ValueError("rot_angular_bins_per_radius must be positive")
+    if config.center_look_layers_per_probe <= 0:
+        raise ValueError("center_look_layers_per_probe must be positive")
 
 
 def _distributed_context(requested_device: str) -> DistributedContext:
@@ -549,6 +552,7 @@ def main() -> None:
         rot_global_directions=config.rot_global_directions,
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
         look_compact_variable_rings=config.look_compact_variable_rings,
+        center_look_layers_per_probe=config.center_look_layers_per_probe,
         feature_ring_look=config.feature_ring_look,
         feature_ring_start_layer=config.feature_ring_start_layer,
         feature_ring_group_size=config.feature_ring_group_size,

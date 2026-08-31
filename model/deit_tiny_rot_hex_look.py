@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 from layers.center_pose_angular_look import CenterPoseAngularLook
+from layers.center_pose_grid_look import CenterPoseGridLook
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
@@ -35,6 +36,8 @@ class DeiTTinyRotHexLook(nn.Module):
         look_compact_variable_rings: bool = False,
         image_look: bool = True,
         center_pose_look: bool = False,
+        center_pose_grid_look: bool = False,
+        center_look_layers_per_probe: int = 1,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
         feature_ring_group_size: int = 4,
@@ -93,7 +96,10 @@ class DeiTTinyRotHexLook(nn.Module):
 
         coo = self.patch_embed.coo_patchs
         patch_coordinates = torch.stack((coo.real, coo.imag), dim=-1)
-        self.center_pose_look = bool(center_pose_look)
+        if center_pose_look and center_pose_grid_look:
+            raise ValueError("simple and grid Center Look are mutually exclusive")
+        self.center_pose_grid_look = bool(center_pose_grid_look)
+        self.center_pose_look = bool(center_pose_look or center_pose_grid_look)
         if self.center_pose_look and feature_ring_look:
             raise ValueError("center-pose Look and feature-ring Look are exclusive")
         self.image_look = bool(image_look)
@@ -140,14 +146,27 @@ class DeiTTinyRotHexLook(nn.Module):
             # Patch-to-patch bias in the final block cannot affect that same
             # block's CLS output.  Keep Center Look on the first 11 blocks;
             # the image Look branch, when present, still spans all 12.
-            self.center_look = CenterPoseAngularLook(
+            center_builder = (
+                CenterPoseGridLook
+                if self.center_pose_grid_look
+                else CenterPoseAngularLook
+            )
+            center_kwargs = {}
+            if self.center_pose_grid_look:
+                center_kwargs = {
+                    "radial_bins": self.look_radial_bins,
+                    "direction_bins": self.look_direction_bins,
+                    "look_radius": 4.0,
+                    "layers_per_probe": center_look_layers_per_probe,
+                }
+            self.center_look = center_builder(
                 coordinates=patch_coordinates,
                 embed_dim=self.embed_dim,
                 num_heads=self.num_heads,
                 depth=self.depth - 1,
                 axes=directions,
                 null_initial_score=tokenizer_null_initial_score,
-                gate_init=0.0,
+                **center_kwargs,
             )
         else:
             self.center_look = None
@@ -215,18 +234,23 @@ class DeiTTinyRotHexLook(nn.Module):
                 layer_pose = pose_weights[:, :, start:stop]
                 layer_fields = fields[start:stop]
             if self.center_look is not None and layer_index < self.center_look.depth:
+                center_pose = (
+                    self.center_look.pose_for_layer(shared_pose, layer_index)
+                    if self.center_pose_grid_look
+                    else shared_pose
+                )
                 center_fields = self.center_look.fields(
                     layer_index, dtype=tokens.dtype
                 )
                 if layer_pose is None:
-                    layer_pose = shared_pose
+                    layer_pose = center_pose
                     layer_fields = center_fields
                 else:
                     # Structured attention is linear in the Look terms.  By
                     # concatenating the two pose bases, one Triton call adds
                     # image Look and Center Look exactly, without a dense bias
                     # tensor or a separate branch gate.
-                    layer_pose = torch.cat((layer_pose, shared_pose), dim=-1)
+                    layer_pose = torch.cat((layer_pose, center_pose), dim=-1)
                     layer_fields = torch.cat((layer_fields, center_fields), dim=1)
             norm1_input = None
             if (
@@ -265,7 +289,12 @@ class DeiTTinyRotHexLook(nn.Module):
     def experiment_diagnostics(self) -> dict[str, object]:
         if self.center_look is None:
             return {}
-        return {"center_pose_angular_look": self.center_look.diagnostics()}
+        name = (
+            "center_pose_grid_look"
+            if self.center_pose_grid_look
+            else "center_pose_angular_look"
+        )
+        return {name: self.center_look.diagnostics()}
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return self.head(self.forward_features(image)[:, 0])

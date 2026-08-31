@@ -43,6 +43,7 @@ MODEL_VARIANTS = {
     "rot_hex_harmonic_look_ring", "rot_hex_harmonic_pe_look_ring",
     "rot_hex_harmonic_center_look", "rot_hex_harmonic_pe_center_look",
     "rot_hex_harmonic_pe_look_center_look",
+    "rot_hex_harmonic_pe_center_grid_look",
 }
 
 
@@ -61,6 +62,7 @@ def build_imagenet100_model(
     rot_global_directions: int = 8,
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
+    center_look_layers_per_probe: int = 1,
     feature_ring_look: bool = False,
     feature_ring_start_layer: int = 0,
     feature_ring_group_size: int = 4,
@@ -169,6 +171,7 @@ def build_imagenet100_model(
         "rot_hex_harmonic_center_look",
         "rot_hex_harmonic_pe_center_look",
         "rot_hex_harmonic_pe_look_center_look",
+        "rot_hex_harmonic_pe_center_grid_look",
     }:
         return DeiTTinyRotHexLook(
             num_classes=num_classes,
@@ -178,6 +181,7 @@ def build_imagenet100_model(
                 "rot_hex_harmonic_pe_look_ring",
                 "rot_hex_harmonic_pe_center_look",
                 "rot_hex_harmonic_pe_look_center_look",
+                "rot_hex_harmonic_pe_center_grid_look",
             },
             lattice_stride=hex_stride,
             kernel_sizes=rot_kernel_sizes,
@@ -189,12 +193,17 @@ def build_imagenet100_model(
             image_look=variant not in {
                 "rot_hex_harmonic_center_look",
                 "rot_hex_harmonic_pe_center_look",
+                "rot_hex_harmonic_pe_center_grid_look",
             },
             center_pose_look=variant in {
                 "rot_hex_harmonic_center_look",
                 "rot_hex_harmonic_pe_center_look",
                 "rot_hex_harmonic_pe_look_center_look",
             },
+            center_pose_grid_look=(
+                variant == "rot_hex_harmonic_pe_center_grid_look"
+            ),
+            center_look_layers_per_probe=center_look_layers_per_probe,
             feature_ring_look=(
                 feature_ring_look
                 or variant in {
