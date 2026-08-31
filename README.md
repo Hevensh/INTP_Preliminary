@@ -146,16 +146,16 @@ patch-to-patch bias in the final block cannot affect that block's CLS output.
 | V20-R1 | 3 | 4 | 55.00 | 81.56 | 5.470M | 155.8 min |
 | **V20-R2** | **4** | **3** | **55.18** | **81.66** | **5.469M** | **155.1 min** |
 | V20-R3 | 6 | 2 | 54.46 | 81.60 | 5.467M | 155.0 min |
+| V22 | 12 | 1 | 54.48 | 81.38 | 5.466M | 145.2 min |
 
-All five rows use `half6d3r`, tokenizer null-softmax, PE, and Center Grid Look;
+All six rows use `half6d3r`, tokenizer null-softmax, PE, and Center Grid Look;
 only `G` changes.  G4 is the current best setting, but its 0.18-point Top-1
-margin over G3 is small.  G6 loses accuracy, suggesting that moderate local
-sharing is preferable to making the direction probe too depth-invariant.  The
-near-identical runtimes within each Kaggle version also show that probe
-evaluation is not the dominant cost; the V19/V20 runtime offset should be
-treated as environment variation rather than an architectural speed result.
-G12, which evaluates one probe for the final incomplete eleven-layer group, is
-scheduled as the global-sharing endpoint.
+margin over G3 is small.  G6 and G12 fall back to 54.46% and 54.48%,
+respectively, giving consistent evidence that moderate local sharing is
+preferable to making the direction probe too depth-invariant.  G12 evaluates
+one probe for the final incomplete eleven-layer Center Look group.  Runtime
+differences between Kaggle versions should be treated as environment variation
+rather than an architectural speed result.
 
 ## Repository map
 
