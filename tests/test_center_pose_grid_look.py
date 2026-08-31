@@ -59,3 +59,36 @@ def test_center_grid_model_replaces_image_look_with_four_by_twelve_templates():
     assert diagnostics["layers_per_probe"] == 3
     assert diagnostics["probe_groups"] == 4
     assert diagnostics["look_grid_shape"] == [11, 3, 4, 12]
+
+
+@pytest.mark.parametrize(
+    ("variant", "has_pe", "has_image_look"),
+    [
+        ("rot_hex_harmonic_center_grid_look", False, False),
+        ("rot_hex_harmonic_pe_look_center_grid_look", True, True),
+    ],
+)
+def test_g4_center_grid_position_ablation_variants(
+    variant: str,
+    has_pe: bool,
+    has_image_look: bool,
+):
+    model = build_imagenet100_model(
+        variant=variant,
+        model_name="deit_tiny_patch16_224",
+        pretrained=False,
+        num_classes=100,
+        image_size=224,
+        rot_directions=6,
+        rot_global_directions=12,
+        rot_angular_bins_per_radius=3,
+        look_compact_variable_rings=True,
+        center_look_layers_per_probe=4,
+        rot_null_initial_score=0.0,
+    )
+    assert (model.pos_embed is not None) is has_pe
+    assert (model.look_bank is not None) is has_image_look
+    assert model.center_pose_grid_look
+    assert model.center_look.layers_per_probe == 4
+    assert model.center_look.probe_groups == 3
+    assert model.center_look.look_grid.shape == (11, 3, 4, 12)
