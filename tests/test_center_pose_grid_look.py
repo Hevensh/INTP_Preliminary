@@ -7,7 +7,7 @@ from layers.center_pose_grid_look import CenterPoseGridLook
 
 @pytest.mark.parametrize(
     ("layers_per_probe", "probe_groups"),
-    [(1, 11), (2, 6), (3, 4), (4, 3), (6, 2)],
+    [(1, 11), (2, 6), (3, 4), (4, 3), (6, 2), (11, 1), (12, 1)],
 )
 def test_center_grid_look_shares_probe_but_keeps_one_grid_per_layer(
     layers_per_probe: int,

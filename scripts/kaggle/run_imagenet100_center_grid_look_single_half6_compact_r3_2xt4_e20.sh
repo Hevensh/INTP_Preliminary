@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]] || [[ ! "$1" =~ ^(1|2|3|4|6)$ ]]; then
-  echo "usage: $0 {1|2|3|4|6}" >&2
+if [[ $# -ne 1 ]] || [[ ! "$1" =~ ^(1|2|3|4|6|12)$ ]]; then
+  echo "usage: $0 {1|2|3|4|6|12}" >&2
   exit 2
 fi
 
