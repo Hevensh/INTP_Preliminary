@@ -129,6 +129,34 @@ improve over the aligned standard baseline under this training budget. They do
 not establish state of the art or universal superiority across datasets,
 backbones, and schedules.
 
+### Center Look probe-sharing ablation
+
+The Center Grid Look branch evaluates a direction probe from tokenizer features
+and routes it through an independent learned `4 radius x 12 direction` map for
+every Transformer layer and head.  `G` is the number of consecutive layers that
+reuse one probe evaluation: a new probe is evaluated at layers `0, G, 2G, ...`,
+and the final group may contain fewer than `G` layers.  The output Look maps are
+never shared.  Center Look affects the first eleven blocks because a
+patch-to-patch bias in the final block cannot affect that block's CLS output.
+
+| Kaggle run | Layers per probe (`G`) | Probe groups | Best Top-1 | Top-5 at best Top-1 | Parameters | Wall time |
+|---|---:|---:|---:|---:|---:|---:|
+| V19-R1 | 1 | 11 | 54.64 | 81.86 | 5.478M | 146.7 min |
+| V19-R2 | 2 | 6 | 54.64 | 81.56 | 5.472M | 146.7 min |
+| V20-R1 | 3 | 4 | 55.00 | 81.56 | 5.470M | 155.8 min |
+| **V20-R2** | **4** | **3** | **55.18** | **81.66** | **5.469M** | **155.1 min** |
+| V20-R3 | 6 | 2 | 54.46 | 81.60 | 5.467M | 155.0 min |
+
+All five rows use `half6d3r`, tokenizer null-softmax, PE, and Center Grid Look;
+only `G` changes.  G4 is the current best setting, but its 0.18-point Top-1
+margin over G3 is small.  G6 loses accuracy, suggesting that moderate local
+sharing is preferable to making the direction probe too depth-invariant.  The
+near-identical runtimes within each Kaggle version also show that probe
+evaluation is not the dominant cost; the V19/V20 runtime offset should be
+treated as environment variation rather than an architectural speed result.
+G12, which evaluates one probe for the final incomplete eleven-layer group, is
+scheduled as the global-sharing endpoint.
+
 ## Repository map
 
 - [`layers/`](layers): Hex geometry, rotating tokenizers, matching kernels, and
