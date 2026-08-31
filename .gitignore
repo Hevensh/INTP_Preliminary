@@ -12,6 +12,9 @@ visualization/
 imgs/
 downloads/
 essay_docu/
+# Keep the experiment index in Git, but store downloaded run artifacts locally.
+runs/*
+!runs/README.md
 diagnostics/results/_smoke_*.json
 diagnostics/results/_smoke_*.pt
 *.pt
