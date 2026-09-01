@@ -501,11 +501,13 @@ def main() -> None:
     parser.add_argument("--output-root")
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--center-look-layers-per-probe", type=int)
     parser.add_argument("--resume")
     args = parser.parse_args()
     config = _load_config(args.config)
     for name in (
-        "experiment_name", "data_root", "output_root", "epochs", "batch_size", "resume"
+        "experiment_name", "data_root", "output_root", "epochs", "batch_size",
+        "center_look_layers_per_probe", "resume"
     ):
         value = getattr(args, name)
         if value is not None:
