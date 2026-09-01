@@ -83,6 +83,37 @@ Set `RUN_BASELINE=0` or `RUN_HEX=0` to run only one arm. An interrupted arm
 automatically resumes from its `last.pt`; a completed arm is skipped. Use a new
 `OUTPUT_ROOT` for an intentional fresh rerun.
 
+### GMR and adaptive-rotation tokenizer comparisons
+
+Two additional same-backbone DeiT-Tiny controls retain the standard 14x14
+Cartesian token grid and learned absolute positional embedding:
+
+- `equi_gmr_pe` follows Equi-ViT's two sequential GMR kernels (6x6 then
+  11x11).  The repository includes the official GMR ring/Gaussian
+  parameterization in a dependency-free 2-D layer.  Because Equi-ViT does not
+  publish its ViT glue code, strides 6 and 2 and intermediate width 24 are the
+  explicit local adaptation used to recover 224 -> 37 -> 14 and the paper's
+  matched two-layer Conv-ViT parameter scale.
+- `arc_adaptive_pe` follows ARC's input-conditioned routing: four canonical
+  patch kernels receive sigmoid mixture weights and softsign angles bounded to
+  +/-40 degrees, are bilinearly rotated and combined, and are then convolved
+  once.  The only adaptation is applying ARC to DeiT's 16x16 patch projection;
+  batch chunking bounds temporary rotated-kernel memory without changing the
+  calculation.
+
+Run both sequentially on two T4 GPUs:
+
+```bash
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_equi_gmr_arc_2xt4_e20.sh
+```
+
+Set `RUN_EQUI_GMR=0` or `RUN_ARC=0` to run only the other arm.  Both default to
+batch 256/GPU and the same 20-epoch optimizer/schedule as the standard DeiT
+control.  If ARC exceeds T4 memory, reduce only its launch with
+`BATCH_SIZE=192 RUN_EQUI_GMR=0`; `arc_batch_chunk_size` limits temporary memory
+but does not change the global training batch.
+
 Each run stores its resolved config, environment, model summary, per-epoch
 metrics, best checkpoint, last checkpoint, and final summary below
 `/kaggle/working/runs` by default.

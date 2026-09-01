@@ -1,3 +1,5 @@
+import math
+
 import pytest
 import torch
 
@@ -7,6 +9,8 @@ from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
 from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
+from layers.gmr_patch_embed import EquiVitGMRPatchEmbed, GaussianMixtureRingConv2d
+from layers.arc_adaptive_patch_embed import ARCAdaptivePatchEmbed
 
 
 def _build(variant: str, **kwargs):
@@ -38,6 +42,68 @@ def test_hex_comparison_only_replaces_patch_embedding_and_position_length():
 
 def test_hex_comparison_forward_shape():
     model = _build("hex_patch").eval()
+    with torch.inference_mode():
+        output = model(torch.randn(1, 3, 224, 224))
+    assert output.shape == (1, 100)
+    assert torch.isfinite(output).all()
+
+
+def test_gmr_efficient_forward_matches_rendered_dense_kernel():
+    layer = GaussianMixtureRingConv2d(3, 5, kernel_size=6, stride=2).eval()
+    image = torch.randn(2, 3, 20, 20)
+    actual = layer(image)
+    expected = torch.nn.functional.conv2d(
+        image,
+        layer.rendered_weight(),
+        layer.bias,
+        stride=2,
+    )
+    torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
+
+
+def test_equi_gmr_model_uses_paper_sized_stem_and_standard_token_grid():
+    model = _build("equi_gmr_pe")
+    assert isinstance(model.patch_embed, EquiVitGMRPatchEmbed)
+    assert model.patch_embed.proj1.kernel_size == 6
+    assert model.patch_embed.proj1.stride == 6
+    assert model.patch_embed.proj2.kernel_size == 11
+    assert model.patch_embed.proj2.stride == 2
+    assert model.patch_embed.num_patches == 196
+    assert model.pos_embed.shape == (1, 197, 192)
+
+
+def test_arc_patch_embed_routes_rotates_and_backpropagates():
+    embed = ARCAdaptivePatchEmbed(
+        img_size=32,
+        patch_size=16,
+        in_chans=3,
+        embed_dim=12,
+        kernel_number=4,
+        batch_chunk_size=1,
+    )
+    image = torch.randn(2, 3, 32, 32, requires_grad=True)
+    output = embed(image)
+    alpha, angle = embed.route(image.detach())
+    assert output.shape == (2, 4, 12)
+    assert alpha.shape == angle.shape == (2, 4)
+    assert torch.all((alpha > 0) & (alpha < 1))
+    assert angle.abs().max() <= math.radians(40.0)
+    output.square().mean().backward()
+    assert torch.isfinite(embed.weight.grad).all()
+    assert torch.isfinite(embed.routing.angle_head.weight.grad).all()
+
+
+def test_arc_model_keeps_standard_token_and_position_shapes():
+    model = _build("arc_adaptive_pe", arc_batch_chunk_size=2)
+    assert isinstance(model.patch_embed, ARCAdaptivePatchEmbed)
+    assert model.patch_embed.kernel_number == 4
+    assert model.patch_embed.num_patches == 196
+    assert model.pos_embed.shape == (1, 197, 192)
+
+
+@pytest.mark.parametrize("variant", ["equi_gmr_pe", "arc_adaptive_pe"])
+def test_new_rotation_comparison_model_forward_shape(variant: str):
+    model = _build(variant, arc_batch_chunk_size=1).eval()
     with torch.inference_mode():
         output = model(torch.randn(1, 3, 224, 224))
     assert output.shape == (1, 100)

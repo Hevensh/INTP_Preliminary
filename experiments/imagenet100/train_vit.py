@@ -77,6 +77,10 @@ class TrainConfig:
     rot_response_gate: str = "exp2"
     rot_response_gate_location: str = "pose"
     rot_score_clamp: float = 4.0
+    gmr_hidden_channels: int = 24
+    arc_kernel_number: int = 4
+    arc_max_angle_degrees: float = 40.0
+    arc_batch_chunk_size: int = 32
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,14 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("rot_angular_bins_per_radius must be positive")
     if config.center_look_layers_per_probe <= 0:
         raise ValueError("center_look_layers_per_probe must be positive")
+    if min(
+        config.gmr_hidden_channels,
+        config.arc_kernel_number,
+        config.arc_batch_chunk_size,
+    ) <= 0:
+        raise ValueError("GMR width, ARC kernel count, and ARC chunk size must be positive")
+    if config.arc_max_angle_degrees <= 0:
+        raise ValueError("arc_max_angle_degrees must be positive")
 
 
 def _distributed_context(requested_device: str) -> DistributedContext:
@@ -564,6 +576,10 @@ def main() -> None:
         rot_response_gate=config.rot_response_gate,
         rot_response_gate_location=config.rot_response_gate_location,
         rot_score_clamp=config.rot_score_clamp,
+        gmr_hidden_channels=config.gmr_hidden_channels,
+        arc_kernel_number=config.arc_kernel_number,
+        arc_max_angle_degrees=config.arc_max_angle_degrees,
+        arc_batch_chunk_size=config.arc_batch_chunk_size,
     ).to(device)
     if distributed.enabled:
         model = DistributedDataParallel(

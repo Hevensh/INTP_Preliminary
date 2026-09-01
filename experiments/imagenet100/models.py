@@ -9,6 +9,8 @@ from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
 from layers.hex_rotating_dot_patch_embed import HexRotatingDotPatchEmbed
 from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPatchEmbed
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
+from layers.gmr_patch_embed import EquiVitGMRPatchEmbed
+from layers.arc_adaptive_patch_embed import ARCAdaptivePatchEmbed
 from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
 from model.resnet_geometric_baselines import (
     build_resnet18_arc4bank,
@@ -33,7 +35,8 @@ MODEL_VARIANTS = {
     "resnet18_mams_fourv_paired",
     "resnet18_stage_mams",
     "resnet18_stage_mams_additive",
-    "deit_tiny", "hex_patch", "rot_hex_pe", "rot_hex_dot_simple_pe",
+    "deit_tiny", "hex_patch", "equi_gmr_pe", "arc_adaptive_pe",
+    "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
     "rot_hex_harmonic_softmax_pe",
@@ -76,6 +79,10 @@ def build_imagenet100_model(
     rot_response_gate: str = "exp2",
     rot_response_gate_location: str = "pose",
     rot_score_clamp: float = 4.0,
+    gmr_hidden_channels: int = 24,
+    arc_kernel_number: int = 4,
+    arc_max_angle_degrees: float = 40.0,
+    arc_batch_chunk_size: int = 32,
 ) -> nn.Module:
     """Build the aligned ImageNet-100 comparison models."""
 
@@ -236,7 +243,24 @@ def build_imagenet100_model(
         return model
 
     embed_dim = int(model.embed_dim)
-    if variant == "hex_patch":
+    if variant == "equi_gmr_pe":
+        patch_embed = EquiVitGMRPatchEmbed(
+            img_size=image_size,
+            in_chans=3,
+            embed_dim=embed_dim,
+            hidden_channels=gmr_hidden_channels,
+        )
+    elif variant == "arc_adaptive_pe":
+        patch_embed = ARCAdaptivePatchEmbed(
+            img_size=image_size,
+            patch_size=16,
+            in_chans=3,
+            embed_dim=embed_dim,
+            kernel_number=arc_kernel_number,
+            max_angle_degrees=arc_max_angle_degrees,
+            batch_chunk_size=arc_batch_chunk_size,
+        )
+    elif variant == "hex_patch":
         patch_embed = HexLinearPatchEmbed(
             img_size=image_size,
             in_chans=3,
