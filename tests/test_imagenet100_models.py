@@ -107,8 +107,10 @@ def test_gevit_builder_uses_p4_group_field_without_absolute_position_embedding()
     assert isinstance(model, GEViTTinyP4)
     assert isinstance(model.patch_embed, C4LiftingPatchEmbed)
     assert model.orientations == 4
-    assert len(model.blocks) == 12
-    assert model.blocks[0].attention.window_size == 5
+    assert model.stage_dims == (144, 288, 336)
+    assert model.stage_depths == (2, 2, 2)
+    assert [len(stage) for stage in model.stages] == [2, 2, 2]
+    assert model.stages[0][0].attention.window_size == 5
     assert not hasattr(model, "pos_embed")
     assert 5_400_000 < sum(parameter.numel() for parameter in model.parameters()) < 5_700_000
 
@@ -119,8 +121,8 @@ def test_gevit_small_forward_backward_and_c4_equivariance():
         image_size=32,
         patch_size=8,
         num_classes=10,
-        embed_dim=24,
-        depth=1,
+        stage_dims=(24,),
+        stage_depths=(1,),
         num_heads=3,
         window_size=3,
     )
@@ -147,21 +149,42 @@ def test_gevit_local_attention_preserves_c4_action():
         image_size=32,
         patch_size=8,
         num_classes=10,
-        embed_dim=24,
-        depth=1,
+        stage_dims=(24,),
+        stage_depths=(1,),
         num_heads=3,
         window_size=3,
     ).eval()
     field = torch.randn(1, 24, 4, 4, 4)
-    actual = model.blocks[0].attention(
+    actual = model.stages[0][0].attention(
         torch.roll(torch.rot90(field, 1, dims=(-2, -1)), shifts=1, dims=2)
     )
     expected = torch.roll(
-        torch.rot90(model.blocks[0].attention(field), 1, dims=(-2, -1)),
+        torch.rot90(model.stages[0][0].attention(field), 1, dims=(-2, -1)),
         shifts=1,
         dims=2,
     )
     torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
+
+
+def test_gevit_pooled_stages_preserve_c4_action():
+    torch.manual_seed(0)
+    model = GEViTTinyP4(
+        image_size=32,
+        patch_size=4,
+        num_classes=10,
+        stage_dims=(12, 24, 48),
+        stage_depths=(1, 1, 1),
+        num_heads=3,
+        window_size=3,
+    ).eval()
+    image = torch.randn(1, 3, 32, 32)
+    actual = model.forward_features(torch.rot90(image, 1, dims=(-2, -1)))
+    expected = torch.roll(
+        torch.rot90(model.forward_features(image), 1, dims=(-2, -1)),
+        shifts=1,
+        dims=2,
+    )
+    torch.testing.assert_close(actual, expected, atol=3e-5, rtol=3e-5)
 
 
 @pytest.mark.parametrize("variant", ["equi_gmr_pe", "arc_adaptive_pe"])

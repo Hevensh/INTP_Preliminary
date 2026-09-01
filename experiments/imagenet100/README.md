@@ -122,10 +122,10 @@ recipe.  It retains the paper's defining computation: a feature field over the
 joint Cartesian x C4 domain, local group self-attention over spatial and
 orientation neighbours, query-orientation-acted relative coordinates, no
 ordinary absolute positional embedding, and spatial-sum/orientation-max class
-readout.  The comparison uses a shared C4 lifting patch bank followed by 12
-constant-width 192-channel, three-head blocks so its 5.52M parameters align
-closely with DeiT-Tiny.  The local window is 5x5 as in the official local
-attention implementation.
+readout.  The comparison uses a shared C4 lifting patch bank followed by the
+official-style 2/2/2 pooled stage layout on 14x14 -> 7x7 -> 3x3 grids.  Stage
+widths 144/288/336 keep its 5.51M parameters aligned closely with DeiT-Tiny;
+all stages use three heads and the official local 5x5 window.
 
 Run the final comparison on two T4 GPUs:
 
@@ -134,10 +134,11 @@ DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
   bash scripts/kaggle/run_imagenet100_gevit_p4_local_2xt4_e20.sh
 ```
 
-The default is a 64/GPU microbatch with four-step gradient accumulation because
+The default is a 128/GPU microbatch with two-step gradient accumulation because
 every token retains four orientation states and attends to 4x5x5 local keys.
-The effective global batch remains 64x2x4 = 512, matching the 256/GPU DeiT
-controls without exceeding a 16GB T4 during local group attention.
+The effective global batch remains 128x2x2 = 512, matching the 256/GPU DeiT
+controls.  Pooling between the 2/2/2 stages removes the twelve-layer 14x14
+activation stack that exceeded a 16GB T4 in the initial implementation.
 
 Reproduction scope: GMR preserves Equi-ViT's published ring/Gaussian kernel
 parameterization and 6x6 -> 11x11 sequence, while ARC preserves its official

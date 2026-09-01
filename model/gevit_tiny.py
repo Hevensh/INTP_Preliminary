@@ -4,10 +4,11 @@ The implementation keeps the defining GE-ViT mechanism from Xu et al. (UAI
 2023): features live on a joint spatial--orientation domain and local
 self-attention uses relative coordinates acted on by the query orientation.
 The original repository targets small images with a bespoke staged backbone.
-Here a C4 lifting patch projection and twelve constant-width blocks provide a
-controlled 224px comparison against DeiT-Tiny; this is therefore an
-algorithm-faithful adaptation, not a reproduction of the paper's training
-recipe or reported datasets.
+Here a C4 lifting patch projection and three pooled stages provide a controlled
+224px comparison at the DeiT-Tiny parameter scale.  The stage layout follows
+the official GE-ViT implementation's 2/2/2 local-attention hierarchy; this is
+therefore an algorithm-faithful adaptation, not a reproduction of the paper's
+training recipe or reported datasets.
 
 Reference (MIT): https://github.com/ZJUCDSYangKaifan/GEVit
 """
@@ -219,7 +220,25 @@ class GEViTLocalAttention(nn.Module):
         k = self._unfold_group(qkv[:, 1])
         v = self._unfold_group(qkv[:, 2])
 
-        content = torch.einsum("bhgld,bhkdpl->bhglkp", q, k)
+        # Arrange the contraction as batched GEMM.  The direct einsum form is
+        # concise but asks cuBLAS for a very large temporary workspace on T4.
+        q_matrix = q.permute(0, 1, 3, 2, 4)
+        k_matrix = k.permute(0, 1, 5, 2, 4, 3).reshape(
+            batch,
+            self.num_heads,
+            height * width,
+            groups * self.points,
+            self.head_dim,
+        )
+        content = torch.matmul(q_matrix, k_matrix.transpose(-1, -2))
+        content = content.reshape(
+            batch,
+            self.num_heads,
+            height * width,
+            groups,
+            groups,
+            self.points,
+        ).permute(0, 1, 3, 2, 4, 5)
         row_dim, col_dim, _ = self.position_dims
         q_row = q[..., :row_dim]
         q_col = q[..., row_dim : row_dim + col_dim]
@@ -228,11 +247,15 @@ class GEViTLocalAttention(nn.Module):
         row = self.row_embedding(self.acted_offsets[..., 0:1].to(q.dtype))
         col = self.col_embedding(self.acted_offsets[..., 1:2].to(q.dtype))
         group = self.group_embedding(self.relative_group).to(q.dtype)
-        spatial_score = torch.einsum("bhgld,gpd->bhglp", q_row, row)
-        spatial_score = spatial_score + torch.einsum(
-            "bhgld,gpd->bhglp", q_col, col
+        spatial_score = torch.matmul(
+            q_row, row.transpose(-1, -2)[None, None]
         )
-        group_score = torch.einsum("bhgld,gkd->bhglk", q_group, group)
+        spatial_score = spatial_score + torch.matmul(
+            q_col, col.transpose(-1, -2)[None, None]
+        )
+        group_score = torch.matmul(
+            q_group, group.transpose(-1, -2)[None, None]
+        )
         score = content + spatial_score.unsqueeze(-2) + group_score.unsqueeze(-1)
         score = score / math.sqrt(float(self.dim))
         valid = self.valid_neighbors[None, None, None, :, None, :]
@@ -248,8 +271,22 @@ class GEViTLocalAttention(nn.Module):
             dim=-1,
         ).reshape_as(score)
         probability = self.attention_dropout(probability)
-        output = torch.einsum("bhglkp,bhkdpl->bhgld", probability, v)
-        output = output.reshape(
+        probability_matrix = probability.permute(0, 1, 3, 2, 4, 5).reshape(
+            batch,
+            self.num_heads,
+            height * width,
+            groups,
+            groups * self.points,
+        )
+        v_matrix = v.permute(0, 1, 5, 2, 4, 3).reshape(
+            batch,
+            self.num_heads,
+            height * width,
+            groups * self.points,
+            self.head_dim,
+        )
+        output = torch.matmul(probability_matrix, v_matrix)
+        output = output.permute(0, 1, 3, 2, 4).reshape(
             batch, self.num_heads, groups, height, width, self.head_dim
         ).permute(0, 1, 5, 2, 3, 4)
         output = output.reshape(batch, channels, groups, height, width)
@@ -304,8 +341,8 @@ class GEViTTinyP4(nn.Module):
         patch_size: int = 16,
         in_channels: int = 3,
         num_classes: int = 100,
-        embed_dim: int = 192,
-        depth: int = 12,
+        stage_dims: tuple[int, ...] = (144, 288, 336),
+        stage_depths: tuple[int, ...] = (2, 2, 2),
         num_heads: int = 3,
         orientations: int = 4,
         window_size: int = 5,
@@ -313,33 +350,64 @@ class GEViTTinyP4(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        if len(stage_dims) != len(stage_depths) or not stage_dims:
+            raise ValueError("stage_dims and stage_depths must have equal nonzero length")
+        if any(dim % num_heads for dim in stage_dims):
+            raise ValueError("every stage dimension must be divisible by num_heads")
         grid_size = image_size // patch_size
         self.num_classes = int(num_classes)
-        self.embed_dim = int(embed_dim)
+        self.embed_dim = int(stage_dims[-1])
         self.orientations = int(orientations)
+        self.stage_dims = tuple(int(dim) for dim in stage_dims)
+        self.stage_depths = tuple(int(depth) for depth in stage_depths)
         self.patch_embed = C4LiftingPatchEmbed(
             image_size=image_size,
             patch_size=patch_size,
             in_channels=in_channels,
-            embed_dim=embed_dim,
+            embed_dim=self.stage_dims[0],
             orientations=orientations,
         )
-        self.blocks = nn.ModuleList(
-            [
-                GEViTBlock(
-                    embed_dim,
-                    num_heads=num_heads,
-                    orientations=orientations,
-                    window_size=window_size,
-                    grid_size=grid_size,
-                    mlp_ratio=mlp_ratio,
-                    dropout=dropout,
+        stages: list[nn.Module] = []
+        transitions: list[nn.Module] = []
+        current_grid = grid_size
+        for stage_index, (stage_dim, stage_depth) in enumerate(
+            zip(self.stage_dims, self.stage_depths)
+        ):
+            stages.append(
+                nn.Sequential(
+                    *[
+                        GEViTBlock(
+                            stage_dim,
+                            num_heads=num_heads,
+                            orientations=orientations,
+                            window_size=window_size,
+                            grid_size=current_grid,
+                            mlp_ratio=mlp_ratio,
+                            dropout=dropout,
+                        )
+                        for _ in range(stage_depth)
+                    ]
                 )
-                for _ in range(depth)
-            ]
-        )
-        self.norm = nn.GroupNorm(1, embed_dim, eps=1e-6)
-        self.head = nn.Conv3d(embed_dim, num_classes, kernel_size=1)
+            )
+            if stage_index + 1 < len(self.stage_dims):
+                transitions.append(
+                    nn.Sequential(
+                        nn.MaxPool3d(
+                            kernel_size=(1, 2, 2),
+                            stride=(1, 2, 2),
+                        ),
+                        nn.Conv3d(
+                            stage_dim,
+                            self.stage_dims[stage_index + 1],
+                            kernel_size=1,
+                        ),
+                    )
+                )
+                current_grid //= 2
+        self.stages = nn.ModuleList(stages)
+        self.transitions = nn.ModuleList(transitions)
+        self.norm = nn.GroupNorm(1, self.embed_dim, eps=1e-6)
+        self.head = nn.Conv3d(self.embed_dim, num_classes, kernel_size=1)
         self.apply(self._initialize)
 
     @staticmethod
@@ -351,8 +419,10 @@ class GEViTTinyP4(nn.Module):
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
-        for block in self.blocks:
-            x = block(x)
+        for stage_index, stage in enumerate(self.stages):
+            x = stage(x)
+            if stage_index < len(self.transitions):
+                x = self.transitions[stage_index](x)
         return self.norm(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
