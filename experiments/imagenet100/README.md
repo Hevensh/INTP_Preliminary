@@ -114,6 +114,40 @@ control.  If ARC exceeds T4 memory, reduce only its launch with
 `BATCH_SIZE=192 RUN_EQUI_GMR=0`; `arc_batch_chunk_size` limits temporary memory
 but does not change the global training batch.
 
+### GE-ViT p4 local-attention comparison
+
+`gevit_p4_local` is a controlled, algorithm-faithful adaptation of GE-ViT, not
+a claim to reproduce the paper's complete small-image architecture or training
+recipe.  It retains the paper's defining computation: a feature field over the
+joint Cartesian x C4 domain, local group self-attention over spatial and
+orientation neighbours, query-orientation-acted relative coordinates, no
+ordinary absolute positional embedding, and spatial-sum/orientation-max class
+readout.  The comparison uses a shared C4 lifting patch bank followed by 12
+constant-width 192-channel, three-head blocks so its 5.52M parameters align
+closely with DeiT-Tiny.  The local window is 5x5 as in the official local
+attention implementation.
+
+Run the final comparison on two T4 GPUs:
+
+```bash
+DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
+  bash scripts/kaggle/run_imagenet100_gevit_p4_local_2xt4_e20.sh
+```
+
+The default is batch 128/GPU because every token retains four orientation
+states and attends to 4x5x5 local keys.  This is a different global batch from
+the 256/GPU DeiT controls; keep the optimizer schedule fixed for the initial
+method comparison, and use a larger batch only after a memory smoke test.
+
+Reproduction scope: GMR preserves Equi-ViT's published ring/Gaussian kernel
+parameterization and 6x6 -> 11x11 sequence, while ARC preserves its official
+router, bounded input-dependent angles, kernel-bank rotation and pre-convolution
+mixture.  Both are adapted only at the tokenizer/backbone boundary to keep a
+common DeiT-Tiny classifier.  GE-ViT changes the full attention backbone, since
+collapsing its orientation axis into an ordinary ViT would remove the mechanism
+being compared.  Consequently all three are faithful operator-level controls,
+not end-to-end reproductions of the papers' original datasets and recipes.
+
 Each run stores its resolved config, environment, model summary, per-epoch
 metrics, best checkpoint, last checkpoint, and final summary below
 `/kaggle/working/runs` by default.

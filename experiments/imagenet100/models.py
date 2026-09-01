@@ -12,6 +12,7 @@ from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmb
 from layers.gmr_patch_embed import EquiVitGMRPatchEmbed
 from layers.arc_adaptive_patch_embed import ARCAdaptivePatchEmbed
 from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
+from model.gevit_tiny import GEViTTinyP4
 from model.resnet_geometric_baselines import (
     build_resnet18_arc4bank,
     build_resnet18_fixed_rotinterp8,
@@ -36,6 +37,7 @@ MODEL_VARIANTS = {
     "resnet18_stage_mams",
     "resnet18_stage_mams_additive",
     "deit_tiny", "hex_patch", "equi_gmr_pe", "arc_adaptive_pe",
+    "gevit_p4_local",
     "rot_hex_pe", "rot_hex_dot_simple_pe",
     "rot_hex_dot_grouped_pe",
     "rot_hex_harmonic_pe",
@@ -171,6 +173,18 @@ def build_imagenet100_model(
         raise ValueError(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
             "set pretrained=false"
+        )
+    if variant == "gevit_p4_local":
+        return GEViTTinyP4(
+            image_size=image_size,
+            patch_size=16,
+            in_channels=3,
+            num_classes=num_classes,
+            embed_dim=192,
+            depth=12,
+            num_heads=3,
+            orientations=4,
+            window_size=5,
         )
     if variant in {
         "rot_hex_harmonic_look",

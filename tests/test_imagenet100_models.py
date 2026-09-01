@@ -11,6 +11,7 @@ from layers.hex_rotating_grouped_dot_patch_embed import HexRotatingGroupedDotPat
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
 from layers.gmr_patch_embed import EquiVitGMRPatchEmbed, GaussianMixtureRingConv2d
 from layers.arc_adaptive_patch_embed import ARCAdaptivePatchEmbed
+from model.gevit_tiny import C4LiftingPatchEmbed, GEViTTinyP4
 
 
 def _build(variant: str, **kwargs):
@@ -99,6 +100,68 @@ def test_arc_model_keeps_standard_token_and_position_shapes():
     assert model.patch_embed.kernel_number == 4
     assert model.patch_embed.num_patches == 196
     assert model.pos_embed.shape == (1, 197, 192)
+
+
+def test_gevit_builder_uses_p4_group_field_without_absolute_position_embedding():
+    model = _build("gevit_p4_local")
+    assert isinstance(model, GEViTTinyP4)
+    assert isinstance(model.patch_embed, C4LiftingPatchEmbed)
+    assert model.orientations == 4
+    assert len(model.blocks) == 12
+    assert model.blocks[0].attention.window_size == 5
+    assert not hasattr(model, "pos_embed")
+    assert 5_400_000 < sum(parameter.numel() for parameter in model.parameters()) < 5_700_000
+
+
+def test_gevit_small_forward_backward_and_c4_equivariance():
+    torch.manual_seed(0)
+    model = GEViTTinyP4(
+        image_size=32,
+        patch_size=8,
+        num_classes=10,
+        embed_dim=24,
+        depth=1,
+        num_heads=3,
+        window_size=3,
+    )
+    image = torch.randn(2, 3, 32, 32, requires_grad=True)
+    lifted = model.patch_embed(image)
+    rotated_lifted = model.patch_embed(torch.rot90(image, 1, dims=(-2, -1)))
+    expected_lifted = torch.roll(
+        torch.rot90(lifted, 1, dims=(-2, -1)),
+        shifts=1,
+        dims=2,
+    )
+    torch.testing.assert_close(rotated_lifted, expected_lifted, atol=2e-5, rtol=2e-5)
+
+    output = model(image)
+    assert output.shape == (2, 10)
+    assert torch.isfinite(output).all()
+    output.square().mean().backward()
+    assert torch.isfinite(image.grad).all()
+
+
+def test_gevit_local_attention_preserves_c4_action():
+    torch.manual_seed(0)
+    model = GEViTTinyP4(
+        image_size=32,
+        patch_size=8,
+        num_classes=10,
+        embed_dim=24,
+        depth=1,
+        num_heads=3,
+        window_size=3,
+    ).eval()
+    field = torch.randn(1, 24, 4, 4, 4)
+    actual = model.blocks[0].attention(
+        torch.roll(torch.rot90(field, 1, dims=(-2, -1)), shifts=1, dims=2)
+    )
+    expected = torch.roll(
+        torch.rot90(model.blocks[0].attention(field), 1, dims=(-2, -1)),
+        shifts=1,
+        dims=2,
+    )
+    torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
 
 
 @pytest.mark.parametrize("variant", ["equi_gmr_pe", "arc_adaptive_pe"])
