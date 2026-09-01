@@ -110,8 +110,11 @@ def _structured_look_forward(
             query_mask[:, None] & key_mask[None, :]
             & (query[:, None] > 0) & (key[None, :] > 0)
         )
-        for pose_index in tl.static_range(0, poses):
-            probability = tl.load(
+        # A runtime loop is materially smaller than fully unrolling every
+        # pose.  The latter is fine for six poses but causes code-size and
+        # register-pressure cliffs for the 12 + 6 dual-Look path on T4.
+        for pose_index in tl.range(0, poses):
+            pose_probability = tl.load(
                 pose_ptr + batch * stride_pb + patch_query * stride_pq
                 + head * stride_ph + pose_index * stride_pp,
                 mask=query_mask & (query > 0) & (patch_query < patch_count),
@@ -124,7 +127,7 @@ def _structured_look_forward(
                 mask=look_valid,
                 other=0.0,
             ).to(tl.float32)
-            score += probability[:, None] * field
+            score += pose_probability[:, None] * field
         if has_dense:
             dense = tl.load(
                 dense_ptr + batch * stride_db + head * stride_dh
@@ -241,7 +244,7 @@ def _structured_look_probability_score_grad(
             query_mask[:, None] & key_mask[None, :]
             & (query[:, None] > 0) & (key[None, :] > 0)
         )
-        for pose_index in tl.static_range(0, poses):
+        for pose_index in tl.range(0, poses):
             pose_probability = tl.load(
                 pose_ptr + batch * stride_pb + patch_query * stride_pq
                 + head * stride_ph + pose_index * stride_pp,
@@ -374,14 +377,33 @@ class _StructuredLookAttention(torch.autograd.Function):
             grad_v = probability.transpose(-2, -1) @ grad_output
 
         patch_score_grad = score_grad[:, :, 1:, 1:].float()
+        # Both Look gradients are independent batched matrix products for
+        # every (head, query) pair.  Expressing that structure explicitly
+        # avoids the poor einsum contraction selected for P=18 on T4-class
+        # GPUs while preserving fp32 accumulation.
+        score_hq = patch_score_grad.permute(1, 2, 0, 3).contiguous().reshape(
+            heads * patch_count, batch, patch_count
+        )
         if needs[3]:
-            grad_pose = torch.einsum(
-                "bhqk,hpqk->bqhp", patch_score_grad, fields.float()
-            ).to(pose.dtype)
+            fields_hq = fields.float().permute(0, 2, 3, 1).contiguous().reshape(
+                heads * patch_count, patch_count, poses
+            )
+            grad_pose = (
+                torch.bmm(score_hq, fields_hq)
+                .reshape(heads, patch_count, batch, poses)
+                .permute(2, 1, 0, 3)
+                .to(pose.dtype)
+            )
         if needs[4]:
-            grad_fields = torch.einsum(
-                "bhqk,bqhp->hpqk", patch_score_grad, pose.float()
-            ).to(fields.dtype)
+            pose_hq = pose.float().permute(2, 1, 3, 0).contiguous().reshape(
+                heads * patch_count, poses, batch
+            )
+            grad_fields = (
+                torch.bmm(pose_hq, score_hq)
+                .reshape(heads, patch_count, poses, patch_count)
+                .permute(0, 2, 1, 3)
+                .to(fields.dtype)
+            )
         if needs[5] and ctx.has_dense:
             grad_dense = patch_score_grad.to(dense_bias.dtype)
         return grad_q, grad_k, grad_v, grad_pose, grad_fields, grad_dense, None

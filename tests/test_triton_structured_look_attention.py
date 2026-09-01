@@ -7,9 +7,9 @@ from layers.triton_structured_look_attention import (
 )
 
 
-def _inputs(device: str):
+def _inputs(device: str, *, poses: int = 8):
     torch.manual_seed(17)
-    batch, heads, patches, dim, poses = 2, 3, 7, 16, 8
+    batch, heads, patches, dim = 2, 3, 7, 16
     tensors = (
         torch.randn(batch, heads, patches + 1, dim, device=device),
         torch.randn(batch, heads, patches + 1, dim, device=device),
@@ -68,6 +68,27 @@ def test_triton_matches_reference_forward_and_all_gradients():
     gradient = torch.randn_like(actual)
     actual.backward(gradient)
     expected.backward(gradient)
+    for actual_input, expected_input in zip(actual_inputs, expected_inputs):
+        torch.testing.assert_close(
+            actual_input.grad, expected_input.grad, atol=3e-5, rtol=3e-5
+        )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_triton_dual_look_pose_count_matches_reference_and_all_gradients():
+    actual_inputs = _inputs("cuda", poses=18)
+    expected_inputs = tuple(
+        tensor.detach().clone().requires_grad_(True) for tensor in actual_inputs
+    )
+    scale = 1 / 16**0.5
+    actual = structured_look_attention(*actual_inputs, scale=scale)
+    expected = reference_structured_look_attention(
+        *expected_inputs, scale=scale
+    )
+    gradient = torch.randn_like(actual)
+    actual.backward(gradient)
+    expected.backward(gradient)
+    torch.testing.assert_close(actual, expected, atol=2e-5, rtol=2e-5)
     for actual_input, expected_input in zip(actual_inputs, expected_inputs):
         torch.testing.assert_close(
             actual_input.grad, expected_input.grad, atol=3e-5, rtol=3e-5

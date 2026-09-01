@@ -57,7 +57,7 @@ G4 当前最好。G6 与 G12 都回落到约 54.5%，说明探针适度跨层共
 ## C. Center Look 放置组合消融
 
 这组固定使用当前最优的 `half6d3r + G4`，用于区分 PE、Image Look 和
-Center Look 的独立贡献。前四项已有可复用结果，后两项正在训练。
+Center Look 的独立贡献。六项均已完成 20 轮对齐训练。
 
 | 配置 | PE | Image Look | G4 Center Look | Best Top-1 | Top-5 | 参数量 | 时间 | 状态/存档目录 |
 |---|:---:|:---:|:---:|---:|---:|---:|---:|---|
@@ -65,8 +65,14 @@ Center Look 的独立贡献。前四项已有可复用结果，后两项正在�
 | Image Look only |  | ✓ |  | 52.42% | 79.48% | 5.453M | 152.7 min | `deit_tiny_rot_hex_harmonic_softmax_look_half6_compact_r3_imagenet100_ddp_e20` |
 | PE + Image Look | ✓ | ✓ |  | 55.04% | 81.80% | 5.491M | 153.2 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_half6_compact_r3_imagenet100_ddp_e20` |
 | PE + G4 Center Look | ✓ |  | ✓ | 55.18% | 81.66% | 5.469M | 155.1 min | `deit_tiny_rot_hex_harmonic_softmax_pe_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
-| G4 Center Look only |  |  | ✓ | - | - | - | - | 正在跑：`deit_tiny_rot_hex_harmonic_softmax_center_grid_look_only_share4l_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + Image Look + G4 Center Look | ✓ | ✓ | ✓ | - | - | - | - | 正在跑：`deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| G4 Center Look only (V24) |  |  | ✓ | 52.34% | 79.22% | 5.431M | 165.5 min | `deit_tiny_rot_hex_harmonic_softmax_center_grid_look_only_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| PE + Image Look + G4 Center Look (V23) | ✓ | ✓ | ✓ | 54.96% | 81.84% | 5.496M | 207.4 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+
+Center Look 单独使用达到 52.34%，与 Image Look only 的 52.42% 接近，但明显
+弱于 PE。三路同时加入达到 54.96%，没有超过 PE + Image Look 的 55.04% 或
+PE + G4 Center Look 的 55.18%。当前单次训练证据因此更支持把 Image Look 与
+Center Look 视为可替换/可组合的消融分支，而不是默认同时启用；差异小于一个
+百分点，仍需多随机种子验证。
 
 ## 弃用或非对齐实验
 
