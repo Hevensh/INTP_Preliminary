@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import math
 import os
@@ -41,6 +42,7 @@ class TrainConfig:
     pretrained: bool = False
     epochs: int = 5
     batch_size: int = 128
+    gradient_accumulation_steps: int = 1
     num_workers: int = 4
     learning_rate: float = 5e-4
     min_learning_rate: float = 1e-6
@@ -123,6 +125,8 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("epochs, batch_size, num_classes, and image_size must be positive")
     if config.num_workers < 0:
         raise ValueError("num_workers must be non-negative")
+    if config.gradient_accumulation_steps <= 0:
+        raise ValueError("gradient_accumulation_steps must be positive")
     if not 0.0 <= config.label_smoothing < 1.0:
         raise ValueError("label_smoothing must be in [0, 1)")
     if config.model_variant not in MODEL_VARIANTS:
@@ -309,6 +313,7 @@ def _run_epoch(
     scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     scaler: torch.amp.GradScaler,
     grad_clip_norm: float,
+    gradient_accumulation_steps: int,
     max_steps: int | None,
     epoch: int,
     epochs: int,
@@ -323,24 +328,50 @@ def _run_epoch(
     next_progress_at = started + progress_interval_seconds
     total_steps = min(len(loader), max_steps if max_steps is not None else len(loader))
     context = torch.enable_grad if training else torch.no_grad
+    if optimizer is not None:
+        optimizer.zero_grad(set_to_none=True)
     with context():
         for step, (images, targets) in enumerate(loader):
             if max_steps is not None and step >= max_steps:
                 break
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
-            if optimizer is not None:
-                optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=amp):
-                logits = model(images)
-                loss = criterion(logits, targets)
-            if optimizer is not None:
-                scaler.scale(loss).backward()
+            update_now = (
+                optimizer is not None
+                and (
+                    (step + 1) % gradient_accumulation_steps == 0
+                    or step + 1 == total_steps
+                )
+            )
+            sync_context = (
+                model.no_sync()
+                if training
+                and isinstance(model, DistributedDataParallel)
+                and not update_now
+                else nullcontext()
+            )
+            with sync_context:
+                with torch.amp.autocast(
+                    device_type=device.type,
+                    dtype=torch.float16,
+                    enabled=amp,
+                ):
+                    logits = model(images)
+                    loss = criterion(logits, targets)
+                if optimizer is not None:
+                    group_start = (step // gradient_accumulation_steps) * gradient_accumulation_steps
+                    group_size = min(
+                        gradient_accumulation_steps,
+                        total_steps - group_start,
+                    )
+                    scaler.scale(loss / group_size).backward()
+            if update_now:
                 if grad_clip_norm > 0:
                     scaler.unscale_(optimizer)
                     nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 scaler.step(optimizer)
                 scaler.update()
+                optimizer.zero_grad(set_to_none=True)
                 if scheduler is not None:
                     scheduler.step()
             count = int(targets.numel())
@@ -492,8 +523,10 @@ def main() -> None:
         print(
             f"[start] {config.experiment_name} | {config.epochs} epochs"
             f" | {distributed.world_size} GPU"
-            f" | batch {config.batch_size}/GPU"
-            f" (global {config.batch_size * distributed.world_size})",
+            f" | microbatch {config.batch_size}/GPU"
+            f" | accumulation {config.gradient_accumulation_steps}"
+            f" (effective global "
+            f"{config.batch_size * distributed.world_size * config.gradient_accumulation_steps})",
             flush=True,
         )
     indexed_payload: list[Any] = [None]
@@ -599,8 +632,11 @@ def main() -> None:
         len(train_loader),
         config.max_train_steps if config.max_train_steps is not None else len(train_loader),
     )
-    total_steps = steps_per_epoch * config.epochs
-    warmup_steps = round(steps_per_epoch * config.warmup_epochs)
+    optimizer_steps_per_epoch = math.ceil(
+        steps_per_epoch / config.gradient_accumulation_steps
+    )
+    total_steps = optimizer_steps_per_epoch * config.epochs
+    warmup_steps = round(optimizer_steps_per_epoch * config.warmup_epochs)
     min_ratio = config.min_learning_rate / config.learning_rate
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
@@ -634,6 +670,12 @@ def main() -> None:
         "backend": dist.get_backend() if distributed.enabled else None,
         "per_device_batch_size": config.batch_size,
         "global_batch_size": config.batch_size * distributed.world_size,
+        "gradient_accumulation_steps": config.gradient_accumulation_steps,
+        "effective_global_batch_size": (
+            config.batch_size
+            * distributed.world_size
+            * config.gradient_accumulation_steps
+        ),
     }
     if distributed.is_main:
         _atomic_json(run_dir / "environment.json", environment)
@@ -693,6 +735,7 @@ def main() -> None:
             scheduler=scheduler,
             scaler=scaler,
             grad_clip_norm=config.grad_clip_norm,
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
             max_steps=config.max_train_steps,
             epoch=epoch,
             epochs=config.epochs,
@@ -712,6 +755,7 @@ def main() -> None:
             scheduler=None,
             scaler=scaler,
             grad_clip_norm=config.grad_clip_norm,
+            gradient_accumulation_steps=1,
             max_steps=config.max_val_steps,
             epoch=epoch,
             epochs=config.epochs,

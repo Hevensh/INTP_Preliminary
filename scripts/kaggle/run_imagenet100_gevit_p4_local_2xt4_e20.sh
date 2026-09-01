@@ -4,7 +4,7 @@ set -euo pipefail
 DATA_ROOT="${DATA_ROOT:-/kaggle/input/datasets/ambityga/imagenet100}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-/kaggle/working/runs}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-64}"
 NAME="deit_tiny_gevit_p4_local_imagenet100_ddp_e20"
 CONFIG="configs/imagenet100/deit_tiny_gevit_p4_local_ddp_e20.json"
 RUN_DIR="${OUTPUT_ROOT}/${NAME}"
@@ -21,7 +21,7 @@ if [[ -f "${CHECKPOINT}" ]]; then
   echo "[resume] ${NAME} from ${CHECKPOINT}"
 fi
 
-echo "[run] GE-ViT p4 local | ${NPROC_PER_NODE} GPUs | batch ${BATCH_SIZE}/GPU | global batch $((NPROC_PER_NODE * BATCH_SIZE))"
+echo "[run] GE-ViT p4 local | ${NPROC_PER_NODE} GPUs | microbatch ${BATCH_SIZE}/GPU | accumulation 4 | effective global batch $((NPROC_PER_NODE * BATCH_SIZE * 4))"
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
   -m experiments.imagenet100.train_vit \
   --config "${CONFIG}" \

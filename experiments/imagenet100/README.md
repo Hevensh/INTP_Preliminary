@@ -134,10 +134,10 @@ DATA_ROOT=/kaggle/input/datasets/ambityga/imagenet100 \
   bash scripts/kaggle/run_imagenet100_gevit_p4_local_2xt4_e20.sh
 ```
 
-The default is batch 128/GPU because every token retains four orientation
-states and attends to 4x5x5 local keys.  This is a different global batch from
-the 256/GPU DeiT controls; keep the optimizer schedule fixed for the initial
-method comparison, and use a larger batch only after a memory smoke test.
+The default is a 64/GPU microbatch with four-step gradient accumulation because
+every token retains four orientation states and attends to 4x5x5 local keys.
+The effective global batch remains 64x2x4 = 512, matching the 256/GPU DeiT
+controls without exceeding a 16GB T4 during local group attention.
 
 Reproduction scope: GMR preserves Equi-ViT's published ring/Gaussian kernel
 parameterization and 6x6 -> 11x11 sequence, while ARC preserves its official
