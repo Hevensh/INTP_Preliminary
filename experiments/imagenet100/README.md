@@ -163,9 +163,10 @@ PYTHON_BIN=/c/Users/Lenovo/.conda/envs/myEnv/python.exe \
   bash scripts/kaggle/download_imagenet100_val.sh
 ```
 
-If the Kaggle API is temporarily unavailable, download `val.X.zip` in the
-browser and place it under `downloads/kaggle/imagenet100-val/`; the same command
-will extract and verify the local archive without contacting Kaggle.
+The downloader enumerates only the `val.X/` tree and fetches its 5,000 images;
+it never requests the 17.4-GB full dataset bundle. If a prepared `val.X.zip` is
+already available, place it under `downloads/kaggle/imagenet100-val/`; the same
+command will extract and verify it without contacting Kaggle.
 
 After placing a compatible `best.pt` checkpoint locally, run the dense 15-degree
 sweep with:
