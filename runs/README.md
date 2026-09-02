@@ -1,6 +1,7 @@
 # ImageNet-100 运行存档索引
 
-Kaggle Notebook：[INTP Img LittleTest](https://www.kaggle.com/code/hevenshchen/intp-img-littletest)
+Kaggle Notebooks：[主实验](https://www.kaggle.com/code/hevenshchen/intp-img-littletest)、
+[XV 双 Look 共享跨度](https://www.kaggle.com/code/xiongwutao/intp-img-littletest)
 
 本页按消融问题组织结果，而不是按运行时间排列。除非单独注明，结果均为
 ImageNet-100、`224x224` 输入、2 x T4、20 epochs。Top-5 取自最佳 Top-1
@@ -17,6 +18,7 @@ ImageNet-100、`224x224` 输入、2 x T4、20 epochs。Top-5 取自最佳 Top-1
 - `Image Look`：由原图 tokenizer 响应产生的 Look Bias。
 - `Center Look`：由中间 token 中心特征产生的方向 Look Bias。
 - `G`：连续多少层复用一次 Center Look 探针评估；各层输出映射仍独立。
+- `XV`：`xiongwutao` Kaggle Notebook 的 Version / Run 编号。
 
 ## A. 方向数与位置编码消融
 
@@ -73,6 +75,27 @@ Center Look 单独使用达到 52.34%，与 Image Look only 的 52.42% 接近，
 PE + G4 Center Look 的 55.18%。当前单次训练证据因此更支持把 Image Look 与
 Center Look 视为可替换/可组合的消融分支，而不是默认同时启用；差异小于一个
 百分点，仍需多随机种子验证。
+
+## D. 双 Look 下的 Center Look 共享跨度
+
+这组固定使用 `Hex + half6d3r + null-softmax + PE + Image Look + Center Look`，
+只改变 `G`。除带 `*` 的 G4 外，均使用提交 `6f06787` 中优化后的结构化
+Look 内核；五组优化运行来自 XV Notebook，训练配置、随机种子和预算对齐。
+
+| Kaggle | G | 探针组数 | Best Top-1 | Top-5 | 参数量 | 时间 | 本地存档目录 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| XV1-R1 | 1 | 11 | 54.76% | 82.20% | 5.505M | 171.5 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share1l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+| XV1-R2 | 2 | 6 | 55.02% | 81.84% | 5.499M | 169.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share2l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+| **XV2-R1** | **3** | **4** | **55.54%** | **81.82%** | **5.497M** | **172.0 min** | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share3l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+| V23* | 4 | 3 | 54.96% | 81.84% | 5.496M | 207.4 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| XV2-R2 | 6 | 2 | 54.92% | 81.82% | 5.495M | 170.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share6l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+| XV2-R3 | 12 | 1 | 54.70% | 81.82% | 5.493M | 171.0 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share12l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+
+G3 当前最好：比 PE + Image Look 高 0.50 个百分点，比相同 G3 的
+PE + Center Look 高 0.54 个百分点。G1 探测过密、G6/G12 共享过宽时均有
+回落，说明双 Look 的互补性依赖中等跨度的 Feature Look 更新。五组优化运行
+稳定在 169.8--172.0 分钟；V23* 使用优化前的静态展开内核，因此其 207.4
+分钟只用于记录历史，不能作为 G4 本身的结构耗时。
 
 ## 弃用或非对齐实验
 
