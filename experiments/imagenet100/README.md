@@ -153,6 +153,37 @@ Each run stores its resolved config, environment, model summary, per-epoch
 metrics, best checkpoint, last checkpoint, and final summary below
 `/kaggle/working/runs` by default.
 
+## Local rotation-consistency evaluation
+
+The local protocol needs only the 5,000-image validation archive, not the four
+training archives. From Git Bash, download and verify it with:
+
+```bash
+PYTHON_BIN=/c/Users/Lenovo/.conda/envs/myEnv/python.exe \
+  bash scripts/kaggle/download_imagenet100_val.sh
+```
+
+If the Kaggle API is temporarily unavailable, download `val.X.zip` in the
+browser and place it under `downloads/kaggle/imagenet100-val/`; the same command
+will extract and verify the local archive without contacting Kaggle.
+
+After placing a compatible `best.pt` checkpoint locally, run the dense 15-degree
+sweep with:
+
+```bash
+python -m experiments.imagenet100.eval_rotation_consistency \
+  --config configs/imagenet100/deit_tiny_ddp_e20.json \
+  --checkpoint downloads/checkpoints/standard/best.pt \
+  --val-root downloads/kaggle/imagenet100-val \
+  --output runs/rotation_consistency/standard.json
+```
+
+The output records per-angle Top-1/Top-5, prediction agreement with 0 degrees,
+agreement on the originally correct subset, Jensen-Shannon divergence, and
+probability cosine similarity. Multiples of 90 degrees use exact tensor turns;
+off-grid angles use reflection padding and bilinear interpolation before the
+same ImageNet normalization.
+
 ## ResNet-18 MAMS branch
 
 This branch tests whether the geometric operator transfers beyond a ViT
