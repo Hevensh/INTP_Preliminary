@@ -67,12 +67,12 @@ ImageNet-100、`224x224` 输入、2 x T4、20 epochs。Top-5 取自最佳 Top-1
 
 ### C1. 当前 G3 关键直接比较
 
-| 配置 | PE | Image Look | Center Look | Best Top-1 | Top-5 | 参数量 | 时间 | 状态/存档目录 |
-|---|:---:|:---:|:---:|---:|---:|---:|---:|---|
-| PE only | ✓ |  |  | 54.54% | 80.46% | 5.464M | 151.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + Image Look | ✓ | ✓ |  | 55.04% | 81.80% | 5.491M | 153.2 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + G3 Center Look | ✓ |  | G3 | 55.00% | 81.56% | 5.470M | 155.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_center_grid_look_share3l_half6_compact_r3_imagenet100_ddp_e20` |
-| **PE + Image Look + G3 Center Look** | **✓** | **✓** | **G3** | **55.54%** | **81.82%** | **5.497M** | **172.0 min** | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share3l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
+| Kaggle | 配置 | PE | Image Look | Center Look | Best Top-1 | Top-5 | 参数量 | 时间 | 本地存档目录 |
+|---|---|:---:|:---:|:---:|---:|---:|---:|---:|---|
+| WV2 | PE only | ✓ |  |  | 54.54% | 80.46% | 5.464M | 151.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_half6_compact_r3_imagenet100_ddp_e20` |
+| WV4-R1 | PE + Image Look | ✓ | ✓ |  | 55.04% | 81.80% | 5.491M | 153.2 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_half6_compact_r3_imagenet100_ddp_e20` |
+| V20-R1 | PE + G3 Center Look | ✓ |  | G3 | 55.00% | 81.56% | 5.470M | 155.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_center_grid_look_share3l_half6_compact_r3_imagenet100_ddp_e20` |
+| **XV2-R1** | **PE + Image Look + G3 Center Look** | **✓** | **✓** | **G3** | **55.54%** | **81.82%** | **5.497M** | **172.0 min** | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share3l_half6_compact_r3_optimized_imagenet100_ddp_e20` |
 
 在相同 G3 下，双 Look 比 PE + Center Look 高 0.54 个 Top-1 百分点；相对于
 PE + Image Look 也提高 0.50 点。这说明 Image Look 与 Center Look 可以互补，
@@ -80,14 +80,14 @@ PE + Image Look 也提高 0.50 点。这说明 Image Look 与 Center Look 可以
 
 ### C2. 历史 G4 完整放置对照
 
-| 配置 | PE | Image Look | Center Look | Best Top-1 | Top-5 | 参数量 | 时间 | 状态/存档目录 |
-|---|:---:|:---:|:---:|---:|---:|---:|---:|---|
-| PE only | ✓ |  |  | 54.54% | 80.46% | 5.464M | 151.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_half6_compact_r3_imagenet100_ddp_e20` |
-| Image Look only |  | ✓ |  | 52.42% | 79.48% | 5.453M | 152.7 min | `deit_tiny_rot_hex_harmonic_softmax_look_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + Image Look | ✓ | ✓ |  | 55.04% | 81.80% | 5.491M | 153.2 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + G4 Center Look | ✓ |  | G4 | 55.18% | 81.66% | 5.469M | 155.1 min | `deit_tiny_rot_hex_harmonic_softmax_pe_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
-| G4 Center Look only (V24) |  |  | G4 | 52.34% | 79.22% | 5.431M | 165.5 min | `deit_tiny_rot_hex_harmonic_softmax_center_grid_look_only_share4l_half6_compact_r3_imagenet100_ddp_e20` |
-| PE + Image Look + G4 Center Look (V23) | ✓ | ✓ | G4 | 54.96% | 81.84% | 5.496M | 207.4 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| Kaggle | 配置 | PE | Image Look | Center Look | Best Top-1 | Top-5 | 参数量 | 时间 | 本地存档目录 |
+|---|---|:---:|:---:|:---:|---:|---:|---:|---:|---|
+| WV2 | PE only | ✓ |  |  | 54.54% | 80.46% | 5.464M | 151.8 min | `deit_tiny_rot_hex_harmonic_softmax_pe_half6_compact_r3_imagenet100_ddp_e20` |
+| WV4-R2 | Image Look only |  | ✓ |  | 52.42% | 79.48% | 5.453M | 152.7 min | `deit_tiny_rot_hex_harmonic_softmax_look_half6_compact_r3_imagenet100_ddp_e20` |
+| WV4-R1 | PE + Image Look | ✓ | ✓ |  | 55.04% | 81.80% | 5.491M | 153.2 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_half6_compact_r3_imagenet100_ddp_e20` |
+| V20-R2 | PE + G4 Center Look | ✓ |  | G4 | 55.18% | 81.66% | 5.469M | 155.1 min | `deit_tiny_rot_hex_harmonic_softmax_pe_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| V24 | G4 Center Look only |  |  | G4 | 52.34% | 79.22% | 5.431M | 165.5 min | `deit_tiny_rot_hex_harmonic_softmax_center_grid_look_only_share4l_half6_compact_r3_imagenet100_ddp_e20` |
+| V23 | PE + Image Look + G4 Center Look | ✓ | ✓ | G4 | 54.96% | 81.84% | 5.496M | 207.4 min | `deit_tiny_rot_hex_harmonic_softmax_pe_look_center_grid_look_share4l_half6_compact_r3_imagenet100_ddp_e20` |
 
 G4 下，三路组合的 54.96% 确实未超过两个单 Look 分支；但结合 C1 与 D 节，
 应将其解释为共享跨度与放置组合不匹配，而不是两种 Look 在机制上互相冲突。
@@ -124,9 +124,9 @@ PE + Center Look 高 0.54 个百分点。G1 探测过密、G6/G12 共享过宽�
 
 | 方法 | Kaggle Notebook | 改造层级 | 核心机制 | Best Top-1 | Top-5 | 相对 Standard Top-1 | 参数量 | 时间 |
 |---|---|---|---|---:|---:|---:|---:|---:|
-| Equi-ViT / GMR + PE | [hevenshchen · V346414357](https://www.kaggle.com/code/hevenshchen/intp-img-littletest?scriptVersionId=346414357) | Tokenizer | 两层 GMR 环形/高斯核，固定几何等变滤波器组 | 41.54% | 70.42% | -9.98 | 5.424M | 151.0 min |
-| ARC Adaptive + PE | [hevenshchen · V346414357](https://www.kaggle.com/code/hevenshchen/intp-img-littletest?scriptVersionId=346414357) | Tokenizer | 输入条件路由预测核混合权重与连续角度，再旋转并合成卷积核 | 49.38% | 76.56% | -2.14 | 5.986M | 155.2 min |
-| GE-ViT p4 local | [wctgy123 · WV18](https://www.kaggle.com/code/wctgy123/intp-img-littletest?scriptVersionId=346502718) | 完整骨干 | C4 方向特征场、局部群自注意力与方向作用的相对位置 | **56.06%** | **82.06%** | **+4.54** | 5.509M | 166.8 min |
+| Equi-ViT / GMR + PE | [hevenshchen · V25-R1](https://www.kaggle.com/code/hevenshchen/intp-img-littletest?scriptVersionId=346414357) | Tokenizer | 两层 GMR 环形/高斯核，固定几何等变滤波器组 | 41.54% | 70.42% | -9.98 | 5.424M | 151.0 min |
+| ARC Adaptive + PE | [hevenshchen · V25-R2](https://www.kaggle.com/code/hevenshchen/intp-img-littletest?scriptVersionId=346414357) | Tokenizer | 输入条件路由预测核混合权重与连续角度，再旋转并合成卷积核 | 49.38% | 76.56% | -2.14 | 5.986M | 155.2 min |
+| GE-ViT p4 local | [wctgy123 · WV18-R1](https://www.kaggle.com/code/wctgy123/intp-img-littletest?scriptVersionId=346502718) | 完整骨干 | C4 方向特征场、局部群自注意力与方向作用的相对位置 | **56.06%** | **82.06%** | **+4.54** | 5.509M | 166.8 min |
 
 ### Equi-ViT / GMR
 
@@ -162,9 +162,10 @@ PE + Center Look 高 0.54 个百分点。G1 探测过密、G6/G12 共享过宽�
   `55.54/81.82` 高 0.52/0.24 点；但两者改变的网络范围不同，论文中应将其作为
   强结构基线，而非同一插件的直接消融。
 
-GMR 与 ARC 在 `hevenshchen` Notebook 的同一个 Script Version `346414357`
-中顺序运行；GE-ViT 来自 `wctgy123` Notebook 的 WV18（Script Version
-`346502718`）。三项均为单随机种子结果，现阶段只支持在当前固定预算下比较，
+GMR 与 ARC 在 `hevenshchen` Notebook 的 V25 中顺序运行，分别记作
+`V25-R1` 和 `V25-R2`；GE-ViT 是 `wctgy123` Notebook 的单次运行，记作
+`WV18-R1`。表中的固定版本链接仍保留各自 Script Version ID，避免 Kaggle
+更新后链接漂移。三项均为单随机种子结果，现阶段只支持在当前固定预算下比较，
 后续正式统计仍需补充多随机种子均值和方差。
 
 ## 弃用或非对齐实验
