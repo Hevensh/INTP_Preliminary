@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import torch.nn as nn
 import timm
-from torchvision.models import resnet18
 
 from layers.hex_linear_patch_embed import HexLinearPatchEmbed
 from layers.hex_rotating_polar_patch_embed import HexRotatingPolarPatchEmbed
@@ -13,29 +12,9 @@ from layers.gmr_patch_embed import EquiVitGMRPatchEmbed
 from layers.arc_adaptive_patch_embed import ARCAdaptivePatchEmbed
 from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
 from model.gevit_tiny import GEViTTinyP4
-from model.resnet_geometric_baselines import (
-    build_resnet18_arc4bank,
-    build_resnet18_fixed_rotinterp8,
-    build_resnet18_mixconv4,
-    build_resnet18_multiscale,
-    build_resnet18_multiscale_rotconv,
-    build_resnet18_rotconv,
-)
-from model.resnet_mams import (
-    build_resnet18_mams,
-    build_resnet18_mams_fourv_paired,
-    build_resnet18_stage_mams,
-    build_resnet18_stage_mams_additive,
-)
 
 
 MODEL_VARIANTS = {
-    "resnet18", "resnet18_multiscale", "resnet18_rotconv4",
-    "resnet18_multiscale_rotconv4", "resnet18_mams",
-    "resnet18_mixconv4", "resnet18_fixed_rotinterp8", "resnet18_arc4bank",
-    "resnet18_mams_fourv_paired",
-    "resnet18_stage_mams",
-    "resnet18_stage_mams_additive",
     "deit_tiny", "hex_patch", "equi_gmr_pe", "arc_adaptive_pe",
     "gevit_p4_local",
     "rot_hex_pe", "rot_hex_dot_simple_pe",
@@ -90,85 +69,6 @@ def build_imagenet100_model(
 
     if variant not in MODEL_VARIANTS:
         raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
-    if variant == "resnet18":
-        if pretrained:
-            raise ValueError("the ResNet comparison is trained from scratch")
-        return resnet18(weights=None, num_classes=num_classes)
-    if variant in {
-        "resnet18_mixconv4",
-        "resnet18_fixed_rotinterp8",
-        "resnet18_arc4bank",
-        "resnet18_multiscale",
-        "resnet18_rotconv4",
-        "resnet18_multiscale_rotconv4",
-    }:
-        if pretrained:
-            raise ValueError("the ResNet comparison is trained from scratch")
-        if variant == "resnet18_mixconv4":
-            return build_resnet18_mixconv4(num_classes=num_classes)
-        if variant == "resnet18_fixed_rotinterp8":
-            return build_resnet18_fixed_rotinterp8(
-                num_classes=num_classes,
-                directions=8,
-            )
-        if variant == "resnet18_arc4bank":
-            return build_resnet18_arc4bank(num_classes=num_classes, kernel_number=4)
-        if variant == "resnet18_multiscale":
-            return build_resnet18_multiscale(num_classes=num_classes)
-        if variant == "resnet18_rotconv4":
-            return build_resnet18_rotconv(
-                num_classes=num_classes,
-                kernel_size=5,
-                directions=4,
-            )
-        return build_resnet18_multiscale_rotconv(
-            num_classes=num_classes,
-            kernel_sizes=(5, 3),
-            directions=4,
-        )
-    if variant == "resnet18_mams":
-        if pretrained:
-            raise ValueError("the MAMS ResNet comparison is trained from scratch")
-        return build_resnet18_mams(
-            num_classes=num_classes,
-            diameters=rot_kernel_sizes,
-            directions=rot_directions,
-            global_directions=rot_global_directions,
-            angular_bins_per_radius=rot_angular_bins_per_radius,
-            prototype_chunk_size=rot_prototype_chunk_size,
-            use_null=rot_use_null,
-            null_initial_score=rot_null_initial_score,
-        )
-    if variant == "resnet18_mams_fourv_paired":
-        if pretrained:
-            raise ValueError("the paired MAMS ResNet comparison is trained from scratch")
-        if len(rot_kernel_sizes) != 2:
-            raise ValueError("paired four-value MAMS requires exactly two scales")
-        return build_resnet18_mams_fourv_paired(
-            num_classes=num_classes,
-            diameters=(int(rot_kernel_sizes[0]), int(rot_kernel_sizes[1])),
-            directions=rot_directions,
-            global_directions=rot_global_directions,
-            angular_bins_per_radius=rot_angular_bins_per_radius,
-            prototype_chunk_size=rot_prototype_chunk_size,
-            null_initial_score=rot_null_initial_score,
-        )
-    if variant in {"resnet18_stage_mams", "resnet18_stage_mams_additive"}:
-        if pretrained:
-            raise ValueError("the stage-routed MAMS comparison is trained from scratch")
-        builder = (
-            build_resnet18_stage_mams_additive
-            if variant == "resnet18_stage_mams_additive"
-            else build_resnet18_stage_mams
-        )
-        return builder(
-            num_classes=num_classes,
-            directions=rot_directions,
-            global_directions=rot_global_directions,
-            angular_bins_per_radius=rot_angular_bins_per_radius,
-            prototype_chunk_size=rot_prototype_chunk_size,
-            null_initial_score=rot_null_initial_score,
-        )
     if variant != "deit_tiny" and pretrained:
         raise ValueError(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "

@@ -83,6 +83,23 @@ def _resolve_val_root(path: Path) -> Path:
     raise FileNotFoundError(f"expected a 100-class val.X ImageFolder below {path}")
 
 
+def _balanced_subset_indices(targets: list[int], sample_count: int) -> list[int]:
+    if sample_count <= 0:
+        raise ValueError("samples must be positive")
+    by_class: dict[int, list[int]] = {}
+    for index, target in enumerate(targets):
+        by_class.setdefault(int(target), []).append(index)
+    if sample_count >= len(targets):
+        return list(range(len(targets)))
+    class_ids = sorted(by_class)
+    quotient, remainder = divmod(sample_count, len(class_ids))
+    selected: list[int] = []
+    for class_offset, class_id in enumerate(class_ids):
+        take = quotient + (class_offset < remainder)
+        selected.extend(by_class[class_id][:take])
+    return sorted(selected)
+
+
 def _build_model(config: TrainConfig, device: torch.device) -> torch.nn.Module:
     return build_imagenet100_model(
         variant=config.model_variant,
@@ -241,15 +258,21 @@ def main() -> None:
     base_probabilities = base_targets = None
     angle_rows: list[dict[str, float]] = []
     started = time.perf_counter()
+    subset_indices: list[int] | None = None
 
     for angle in angles:
-        dataset: Dataset = RotatedValidationDataset(
+        rotated_dataset = RotatedValidationDataset(
             val_root, image_size=config.image_size, angle=angle
         )
         if args.samples is not None:
-            if args.samples <= 0:
-                raise ValueError("samples must be positive")
-            dataset = Subset(dataset, range(min(args.samples, len(dataset))))
+            if subset_indices is None:
+                subset_indices = _balanced_subset_indices(
+                    rotated_dataset.dataset.targets,
+                    min(args.samples, len(rotated_dataset)),
+                )
+            dataset: Dataset = Subset(rotated_dataset, subset_indices)
+        else:
+            dataset = rotated_dataset
         loader = DataLoader(
             dataset,
             batch_size=args.batch_size,

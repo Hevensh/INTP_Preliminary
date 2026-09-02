@@ -3,6 +3,7 @@ import torch
 from experiments.imagenet100.eval_rotation_consistency import (
     _aggregate_rows,
     _angle_metrics,
+    _balanced_subset_indices,
     _parse_angles,
 )
 
@@ -31,3 +32,9 @@ def test_identical_probabilities_have_perfect_consistency() -> None:
     )
     assert summary["mean_top1"] == 100.0
     assert summary["mean_top1_drop"] == 0.0
+
+
+def test_sample_limit_is_balanced_across_classes() -> None:
+    targets = [0] * 5 + [1] * 5 + [2] * 5
+    selected = _balanced_subset_indices(targets, 6)
+    assert [targets[index] for index in selected] == [0, 0, 1, 1, 2, 2]
