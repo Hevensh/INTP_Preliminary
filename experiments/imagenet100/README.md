@@ -184,3 +184,6 @@ agreement on the originally correct subset, Jensen-Shannon divergence, and
 probability cosine similarity. Multiples of 90 degrees use exact tensor turns;
 off-grid angles use reflection padding and bilinear interpolation before the
 same ImageNet normalization.
+
+The first balanced 1,000-image comparison and its interpretation boundaries
+are recorded in [rotation_consistency.md](rotation_consistency.md).
