@@ -106,8 +106,9 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
     """Hex tokenizer whose Full prototypes progressively specialize.
 
     Every source prototype permanently owns the same pair of output channels.
-    Full, Angular, and Stripe use circular cosine/sine moments.  Color has no
-    direction axis, so its pair is the two-scale one-hot moment (K24, K12).
+    Full, Angular, and Stripe use circular cosine/sine moments.  Color remains
+    implemented for old differentiated checkpoints, but new differentiation
+    plans only choose between Angular and Stripe.
     """
 
     def __init__(
@@ -423,7 +424,6 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
             estimate = torch.einsum("pcm,sm->pcs", prototypes, reconstruction)
             return ((target - estimate).square() * cover).sum((1, 2)) / denominator
 
-        color_error = relative_error(self.fit_color_reconstruction)
         angular_error = relative_error(self.fit_angular_reconstruction)
         stripe_estimate = torch.einsum(
             "pcm,osm->pocs", prototypes, self.fit_stripe_reconstruction
@@ -432,12 +432,11 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
             (target[:, None] - stripe_estimate).square() * cover[:, None]
         ).sum((2, 3)) / denominator[:, None]
         best_stripe_error, best_stripe_offset = stripe_error.min(dim=1)
-        errors = torch.stack((angular_error, best_stripe_error, color_error), dim=1)
+        errors = torch.stack((angular_error, best_stripe_error), dim=1)
         dimensions = torch.tensor(
             [
                 self.angular_bins,
                 self.stripe_transverse_bins * self.stripe_longitudinal_bins,
-                1,
             ],
             device=errors.device,
             dtype=errors.dtype,
@@ -445,7 +444,7 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
         costs = errors + float(complexity_weight) * dimensions / self.full_parameter_width
         best_cost, best_family = costs.min(dim=1)
         selected = torch.topk(best_cost, convert_count, largest=False).indices
-        target_names = ("angular", "stripe", "color")
+        target_names = ("angular", "stripe")
         assignments = []
         for local_index in selected.tolist():
             target_index = int(best_family[local_index])
@@ -526,4 +525,3 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
                 self.prototype_bank[base] = nn.Parameter(
                     torch.empty(source.shape, device=current.device, dtype=current.dtype)
                 )
-

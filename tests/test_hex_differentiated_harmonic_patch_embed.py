@@ -39,6 +39,11 @@ def test_three_stage_differentiation_keeps_output_slots_stable():
         )
         audit, _ = tokenizer.apply_differentiation(plan)
         assert audit["family_counts"]["full"] == target
+        assert audit["family_counts"]["color"] == 0
+        assert all(
+            assignment["family"] in {"angular", "stripe"}
+            for assignment in plan["assignments"]
+        )
 
     output = tokenizer(image)
     assert output.shape == (2, tokenizer.num_patches, 8)
@@ -69,6 +74,19 @@ def test_color_uses_two_scale_one_hot_output_with_null_attenuation():
     )
     assert (output >= 0).all()
     assert (output.sum(-1) <= 1.0 + 1e-6).all()
+
+
+def test_new_differentiation_plans_exclude_color_even_for_uniform_prototypes():
+    tokenizer = build_tokenizer(bases=1)
+    with torch.no_grad():
+        tokenizer.prototype_bank[0].fill_(1.0)
+
+    plan = tokenizer.plan_differentiation(
+        target_full_count=0, complexity_weight=0.4
+    )
+
+    assert len(plan["assignments"]) == 1
+    assert plan["assignments"][0]["family"] in {"angular", "stripe"}
 
 
 def test_optimizer_moments_are_projected_and_checkpoint_shapes_restore():
