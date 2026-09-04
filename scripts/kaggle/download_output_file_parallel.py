@@ -70,7 +70,17 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--retries", type=int, default=5)
+    parser.add_argument(
+        "--part-size-kib",
+        type=int,
+        default=None,
+        help="Optional fixed range size; useful for unstable large-file downloads.",
+    )
     args = parser.parse_args()
+    if args.workers <= 0 or (
+        args.part_size_kib is not None and args.part_size_kib <= 0
+    ):
+        parser.error("workers and part-size-kib must be positive")
 
     response = signed_output_url(
         args.owner, args.notebook, args.version, args.remote_path
@@ -80,9 +90,14 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     parts_dir = args.output.parent / f".{args.output.name}.parts"
     parts_dir.mkdir(parents=True, exist_ok=True)
-    part_size = math.ceil(total / args.workers)
+    part_size = (
+        int(args.part_size_kib) * 1024
+        if args.part_size_kib is not None
+        else math.ceil(total / args.workers)
+    )
     ranges = []
-    for index in range(args.workers):
+    part_count = math.ceil(total / part_size)
+    for index in range(part_count):
         start = index * part_size
         if start >= total:
             break
