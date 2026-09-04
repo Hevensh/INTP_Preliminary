@@ -28,6 +28,9 @@ from experiments.imagenet100.data import (
     load_or_index_imagefolder_samples,
 )
 from experiments.imagenet100.models import MODEL_VARIANTS, build_imagenet100_model
+from experiments.imagenet100.differentiation_optimizer import (
+    rebuild_adamw_and_scheduler,
+)
 
 
 @dataclass
@@ -79,6 +82,12 @@ class TrainConfig:
     rot_response_gate: str = "exp2"
     rot_response_gate_location: str = "pose"
     rot_score_clamp: float = 4.0
+    rot_progressive_differentiation: bool = False
+    rot_differentiation_epochs: tuple[int, ...] = (3, 5, 7)
+    rot_full_retention_fractions: tuple[float, ...] = (0.75, 0.50, 0.25)
+    rot_family_complexity_weight: float = 0.4
+    rot_stripe_longitudinal_bins: int = 3
+    rot_stripe_offset_subdivisions: int = 4
     gmr_hidden_channels: int = 24
     arc_kernel_number: int = 4
     arc_max_angle_degrees: float = 40.0
@@ -145,6 +154,33 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("GMR width, ARC kernel count, and ARC chunk size must be positive")
     if config.arc_max_angle_degrees <= 0:
         raise ValueError("arc_max_angle_degrees must be positive")
+    if config.rot_progressive_differentiation:
+        epochs = tuple(int(epoch) for epoch in config.rot_differentiation_epochs)
+        fractions = tuple(float(value) for value in config.rot_full_retention_fractions)
+        if len(epochs) != len(fractions) or not epochs:
+            raise ValueError(
+                "rot_differentiation_epochs and rot_full_retention_fractions "
+                "must have the same non-zero length"
+            )
+        if any(epoch <= 0 or epoch > config.epochs for epoch in epochs):
+            raise ValueError("differentiation epochs must lie inside the training schedule")
+        if any(right <= left for left, right in zip(epochs, epochs[1:])):
+            raise ValueError("differentiation epochs must be strictly increasing")
+        if any(not 0.0 < value <= 1.0 for value in fractions):
+            raise ValueError("Full retention fractions must lie in (0, 1]")
+        if any(right >= left for left, right in zip(fractions, fractions[1:])):
+            raise ValueError("Full retention fractions must be strictly decreasing")
+        if len(tuple(config.rot_kernel_sizes)) != 2:
+            raise ValueError("progressive differentiation currently requires two scales")
+        if not config.rot_use_null:
+            raise ValueError("progressive differentiation requires null-softmax routing")
+        if config.rot_family_complexity_weight < 0:
+            raise ValueError("rot_family_complexity_weight must be non-negative")
+        if min(
+            config.rot_stripe_longitudinal_bins,
+            config.rot_stripe_offset_subdivisions,
+        ) <= 0:
+            raise ValueError("Stripe resolutions must be positive")
 
 
 def _distributed_context(requested_device: str) -> DistributedContext:
@@ -493,6 +529,78 @@ def _restore_checkpoint(
     return int(checkpoint["epoch"]) + 1, float(checkpoint.get("best_top1", -1.0))
 
 
+def _prepare_model_for_checkpoint(model: nn.Module, path: Path) -> None:
+    """Restore dynamic prototype shapes before optimizer construction."""
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    patch_embed = getattr(model, "patch_embed", None)
+    prepare = getattr(patch_embed, "prepare_for_state_dict", None)
+    if prepare is not None:
+        prepare(checkpoint["model"], prefix="patch_embed.")
+
+
+def _wrap_distributed(model: nn.Module, context: DistributedContext) -> nn.Module:
+    if not context.enabled:
+        return model
+    return DistributedDataParallel(
+        model,
+        device_ids=[context.local_rank],
+        output_device=context.local_rank,
+        broadcast_buffers=False,
+        gradient_as_bucket_view=True,
+    )
+
+
+def _apply_progressive_differentiation(
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.AdamW,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    target_full_count: int,
+    complexity_weight: float,
+    learning_rate: float,
+    weight_decay: float,
+    scheduler_factory,
+    distributed: DistributedContext,
+) -> tuple[
+    nn.Module,
+    torch.optim.AdamW,
+    torch.optim.lr_scheduler.LRScheduler,
+    dict[str, Any],
+]:
+    raw_model = _raw_model(model)
+    patch_embed = getattr(raw_model, "patch_embed", None)
+    if patch_embed is None or not hasattr(patch_embed, "plan_differentiation"):
+        raise TypeError("the selected tokenizer does not support differentiation")
+
+    payload: list[Any] = [None]
+    if distributed.is_main:
+        payload[0] = patch_embed.plan_differentiation(
+            target_full_count=target_full_count,
+            complexity_weight=complexity_weight,
+        )
+    if distributed.enabled:
+        dist.broadcast_object_list(payload, src=0, device=distributed.device)
+        dist.barrier()
+    audit, conversions = patch_embed.apply_differentiation(payload[0])
+    optimizer, scheduler, optimizer_audit = rebuild_adamw_and_scheduler(
+        model=raw_model,
+        old_optimizer=optimizer,
+        old_scheduler=scheduler,
+        conversions=conversions,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        scheduler_factory=scheduler_factory,
+    )
+    model = _wrap_distributed(raw_model, distributed)
+    audit["optimizer_state"] = optimizer_audit
+    audit["model_parameters"] = sum(
+        parameter.numel() for parameter in raw_model.parameters()
+    )
+    if distributed.enabled:
+        dist.barrier()
+    return model, optimizer, scheduler, audit
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reproducible DeiT-Tiny ImageNet-100 training.")
     parser.add_argument("--config", type=Path, required=True)
@@ -611,19 +719,17 @@ def main() -> None:
         rot_response_gate=config.rot_response_gate,
         rot_response_gate_location=config.rot_response_gate_location,
         rot_score_clamp=config.rot_score_clamp,
+        rot_progressive_differentiation=config.rot_progressive_differentiation,
+        rot_stripe_longitudinal_bins=config.rot_stripe_longitudinal_bins,
+        rot_stripe_offset_subdivisions=config.rot_stripe_offset_subdivisions,
         gmr_hidden_channels=config.gmr_hidden_channels,
         arc_kernel_number=config.arc_kernel_number,
         arc_max_angle_degrees=config.arc_max_angle_degrees,
         arc_batch_chunk_size=config.arc_batch_chunk_size,
-    ).to(device)
-    if distributed.enabled:
-        model = DistributedDataParallel(
-            model,
-            device_ids=[distributed.local_rank],
-            output_device=distributed.local_rank,
-            broadcast_buffers=False,
-            gradient_as_bucket_view=True,
-        )
+    )
+    if config.resume is not None:
+        _prepare_model_for_checkpoint(model, Path(config.resume))
+    model = _wrap_distributed(model.to(device), distributed)
     criterion = nn.CrossEntropyLoss(label_smoothing=config.label_smoothing)
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -640,12 +746,20 @@ def main() -> None:
     total_steps = optimizer_steps_per_epoch * config.epochs
     warmup_steps = round(optimizer_steps_per_epoch * config.warmup_epochs)
     min_ratio = config.min_learning_rate / config.learning_rate
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: _cosine_lambda(
-            step, total_steps=total_steps, warmup_steps=warmup_steps, min_ratio=min_ratio
-        ),
-    )
+    def scheduler_factory(
+        target_optimizer: torch.optim.Optimizer,
+    ) -> torch.optim.lr_scheduler.LRScheduler:
+        return torch.optim.lr_scheduler.LambdaLR(
+            target_optimizer,
+            lr_lambda=lambda step: _cosine_lambda(
+                step,
+                total_steps=total_steps,
+                warmup_steps=warmup_steps,
+                min_ratio=min_ratio,
+            ),
+        )
+
+    scheduler = scheduler_factory(optimizer)
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
 
     run_dir = Path(config.output_root) / config.experiment_name
@@ -721,6 +835,13 @@ def main() -> None:
             record = json.loads(line)
             if int(record.get("epoch", 0)) < start_epoch:
                 history.append(record)
+    differentiation_schedule = {
+        int(epoch): round(config.rot_bases * float(fraction))
+        for epoch, fraction in zip(
+            config.rot_differentiation_epochs,
+            config.rot_full_retention_fractions,
+        )
+    } if config.rot_progressive_differentiation else {}
     training_started = time.perf_counter()
     for epoch in range(start_epoch, config.epochs + 1):
         if isinstance(train_loader.sampler, DistributedSampler):
@@ -745,6 +866,32 @@ def main() -> None:
             progress_interval_seconds=config.progress_interval_seconds,
             distributed=distributed,
         )
+        differentiation_audit = None
+        if epoch in differentiation_schedule:
+            before = _raw_model(model).patch_embed.family_counts()
+            model, optimizer, scheduler, differentiation_audit = (
+                _apply_progressive_differentiation(
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    target_full_count=differentiation_schedule[epoch],
+                    complexity_weight=config.rot_family_complexity_weight,
+                    learning_rate=config.learning_rate,
+                    weight_decay=config.weight_decay,
+                    scheduler_factory=scheduler_factory,
+                    distributed=distributed,
+                )
+            )
+            if distributed.is_main:
+                after = differentiation_audit["family_counts"]
+                state = differentiation_audit["optimizer_state"]
+                print(
+                    f"[differentiate {epoch:02d}] Full {before['full']}->{after['full']}"
+                    f" | Angular {after['angular']} | Stripe {after['stripe']}"
+                    f" | Color {after['color']}"
+                    f" | optimizer state {100 * state['state_numel_coverage']:.1f}%",
+                    flush=True,
+                )
         if distributed.is_main:
             print(f"[epoch {epoch:02d}/{config.epochs:02d}] validate", flush=True)
         val_metrics = _run_epoch(
@@ -771,6 +918,8 @@ def main() -> None:
             "train": asdict(train_metrics),
             "val": asdict(val_metrics),
         }
+        if differentiation_audit is not None:
+            record["differentiation"] = differentiation_audit
         if distributed.is_main:
             history.append(record)
             _append_jsonl(metrics_path, record)
@@ -793,6 +942,18 @@ def main() -> None:
         if distributed.enabled:
             dist.barrier()
 
+    raw_model = _raw_model(model)
+    model_summary["parameters"] = sum(
+        parameter.numel() for parameter in raw_model.parameters()
+    )
+    model_summary["trainable_parameters"] = sum(
+        parameter.numel() for parameter in raw_model.parameters() if parameter.requires_grad
+    )
+    if hasattr(raw_model.patch_embed, "family_counts"):
+        model_summary["geometry_family_counts"] = raw_model.patch_embed.family_counts()
+        model_summary["effective_geometry_parameters"] = sum(
+            parameter.numel() for parameter in raw_model.patch_embed.prototype_bank
+        )
     summary: dict[str, Any] = {
         "status": "complete",
         "experiment_name": config.experiment_name,
@@ -802,6 +963,15 @@ def main() -> None:
         "history": history,
         **model_summary,
     }
+    if config.rot_progressive_differentiation:
+        summary["differentiation_history"] = [
+            {
+                "epoch": record["epoch"],
+                **record["differentiation"],
+            }
+            for record in history
+            if "differentiation" in record
+        ]
     if hasattr(raw_model, "experiment_diagnostics"):
         diagnostics = raw_model.experiment_diagnostics()
         if diagnostics:
@@ -814,6 +984,7 @@ def main() -> None:
             }
         )
     if distributed.is_main:
+        _atomic_json(run_dir / "model_summary.json", model_summary)
         _atomic_json(run_dir / "summary.json", summary)
         print(
             f"[done] {config.experiment_name}"

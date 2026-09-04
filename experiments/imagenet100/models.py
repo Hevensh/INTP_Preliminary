@@ -64,6 +64,9 @@ def build_imagenet100_model(
     arc_kernel_number: int = 4,
     arc_max_angle_degrees: float = 40.0,
     arc_batch_chunk_size: int = 32,
+    rot_progressive_differentiation: bool = False,
+    rot_stripe_longitudinal_bins: int = 3,
+    rot_stripe_offset_subdivisions: int = 4,
 ) -> nn.Module:
     """Build the aligned ImageNet-100 comparison models."""
 
@@ -145,6 +148,9 @@ def build_imagenet100_model(
             feature_ring_frequency=feature_ring_frequency,
             prototype_chunk_size=rot_prototype_chunk_size,
             tokenizer_null_initial_score=rot_null_initial_score,
+            progressive_differentiation=rot_progressive_differentiation,
+            stripe_longitudinal_bins=rot_stripe_longitudinal_bins,
+            stripe_offset_subdivisions=rot_stripe_offset_subdivisions,
         )
 
     model = timm.create_model(

@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 
 from layers.hex_rotating_harmonic_patch_embed import HexRotatingHarmonicPatchEmbed
+from layers.hex_differentiated_harmonic_patch_embed import (
+    HexDifferentiatedHarmonicPatchEmbed,
+)
 from layers.center_pose_angular_look import CenterPoseAngularLook
 from layers.center_pose_grid_look import CenterPoseGridLook
 from layers.mini_vit import TransformerBlock, init_vit_weights
@@ -44,13 +47,21 @@ class DeiTTinyRotHexLook(nn.Module):
         feature_ring_frequency: bool = False,
         prototype_chunk_size: int = 16,
         tokenizer_null_initial_score: float = 0.0,
+        progressive_differentiation: bool = False,
+        stripe_longitudinal_bins: int = 3,
+        stripe_offset_subdivisions: int = 4,
     ) -> None:
         super().__init__()
         self.embed_dim = 192
         self.depth = 12
         self.num_heads = 3
         self.use_pos_embed = bool(use_pos_embed)
-        self.patch_embed = HexRotatingHarmonicPatchEmbed(
+        tokenizer_type = (
+            HexDifferentiatedHarmonicPatchEmbed
+            if progressive_differentiation
+            else HexRotatingHarmonicPatchEmbed
+        )
+        tokenizer_kwargs = dict(
             img_size=image_size,
             in_chans=3,
             embed_dim=self.embed_dim,
@@ -61,11 +72,20 @@ class DeiTTinyRotHexLook(nn.Module):
             global_directions=global_directions,
             angular_bins_per_radius=angular_bins_per_radius,
             prototype_chunk_size=prototype_chunk_size,
-            pose_softmax=True,
-            use_null=True,
             null_initial_score=tokenizer_null_initial_score,
-            match_metric="dot",
         )
+        if progressive_differentiation:
+            tokenizer_kwargs.update(
+                stripe_longitudinal_bins=stripe_longitudinal_bins,
+                stripe_offset_subdivisions=stripe_offset_subdivisions,
+            )
+        else:
+            tokenizer_kwargs.update(
+                pose_softmax=True,
+                use_null=True,
+                match_metric="dot",
+            )
+        self.patch_embed = tokenizer_type(**tokenizer_kwargs)
         token_count = self.patch_embed.num_patches + 1
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         if self.use_pos_embed:
