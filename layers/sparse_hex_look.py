@@ -53,26 +53,37 @@ class SparseHexLookLayout(nn.Module):
         return torch.einsum('bchma,hmae->bhce',pose,rotated)/pose.shape[3]
 
 
+class _SparseBias(torch.autograd.Function):
+    """Expand sparse entries once; gather their gradients without dense copies."""
+
+    @staticmethod
+    def forward(ctx, values, centers, keys, valid, sequence):
+        indices = (centers[:, None] * sequence + keys).flatten()
+        ctx.save_for_backward(indices, valid)
+        ctx.value_shape = values.shape
+        bias = values.new_zeros(*values.shape[:2], sequence * sequence)
+        bias.scatter_add_(2, indices[None, None].expand(*values.shape[:2], -1),
+                          (values * valid).flatten(2))
+        return bias.view(*values.shape[:2], sequence, sequence)
+
+    @staticmethod
+    def backward(ctx, grad):
+        indices, valid = ctx.saved_tensors
+        # Index the two spatial axes directly: SDPA may return a padded stride.
+        n = grad.shape[-1]
+        selected = grad[:, :, indices // n, indices % n]
+        return selected.reshape(ctx.value_shape) * valid, None, None, None, None
+
+
 def sparse_query_attention(q,k,v,centers,keys,valid,values,ordinary=None,*,scale,dropout_p=0.):
     """Global attention remains global. Only selected query rows carry bias.
 
-    Ordinary rows use SDPA; selected rows use a small explicit FP32 softmax.
-    No dense N*N Look tensor, no spatial interpolation, no masked-out keys.
+    A single SDPA call keeps all queries in the same fused attention path.
+    The temporary dense bias trades memory for avoiding a separate FP32
+    attention branch and duplicated K/V gradients. No spatial interpolation
+    or masked-out keys. ``ordinary`` remains accepted for checkpoint callers.
     Indices include CLS. Invalid boundary neighbors contribute zero.
     """
-    n=q.shape[2]
-    selected=q.index_select(2,centers)
-    mask=values.new_zeros(*values.shape[:-1],n)
-    indices=keys[None,None].expand(values.shape[0],values.shape[1],-1,-1)
-    mask=mask.scatter_add(-1,indices,values*valid[None,None])
-    with torch.autocast(device_type=q.device.type,enabled=False):
-        logits=(selected.float()@k.float().transpose(-2,-1))*scale+mask.float()
-        prob=F.dropout(logits.softmax(-1),p=dropout_p,training=dropout_p>0)
-        special=(prob@v.float()).to(q.dtype)
-    if ordinary is None:
-        keep=torch.ones(n,dtype=torch.bool,device=q.device)
-        keep[centers]=False
-        ordinary=keep.nonzero().flatten()
-    normal=F.scaled_dot_product_attention(q.index_select(2,ordinary),k,v,dropout_p=dropout_p,scale=scale)
-    out=torch.zeros_like(q).index_copy(2,ordinary,normal)
-    return out.index_copy(2,centers,special)
+    bias = _SparseBias.apply(values.to(q.dtype), centers, keys, valid, q.shape[2])
+    return F.scaled_dot_product_attention(q, k, v, attn_mask=bias,
+                                         dropout_p=dropout_p, scale=scale)

@@ -433,6 +433,7 @@ class DeiTTinyRotHexLook(nn.Module):
         if self.sparse_hex_look:
             layout=self.sparse_layout
             return {'sparse_hex_look':True,'query_count':len(layout.centers),
+                    'sparse_attention_backend':'single_sdpa_dense_bias_v1',
                     'token_count':self.patch_embed.num_patches,
                     'center_indices':layout.centers.cpu().tolist(),
                     'center_axial':layout.axial[layout.centers].cpu().tolist(),

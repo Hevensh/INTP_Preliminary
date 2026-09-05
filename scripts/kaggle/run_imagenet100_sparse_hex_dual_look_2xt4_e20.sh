@@ -7,4 +7,5 @@ export EPOCHS=20
 export FEATURE_MODE=independent
 export SPARSE_HEX_LOOK=1
 echo "[layout] sparse Hex centers | K12 inner6 / K24 outer12 | Feature all18 | no Look interpolation"
+echo "[attention] single SDPA | temporary dense bias | no separate FP32 branch"
 bash scripts/kaggle/run_imagenet100_dual_look_multiprobe_2xt4.sh 4 4

@@ -75,3 +75,27 @@ def test_scale_ring_aggregation_matches_explicit_sum():
                     scale=1 if e<6 else 0
                     expected[:,h,:,e]+=p[:,:,h,probe,scale,a]*t[h,probe,m.permutations[a,e]]/4
     torch.testing.assert_close(actual,expected)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
+def test_sparse_attention_amp_gradients():
+    torch.manual_seed(42)
+    q,k,v=[torch.randn(2,3,196,64,device='cuda',dtype=torch.float16,
+                       requires_grad=True) for _ in range(3)]
+    centers=torch.tensor([2,7],device='cuda')
+    # Duplicate and invalid entries test accumulation and zero boundary grads.
+    keys=torch.tensor([[1,1,0],[4,8,9]],device='cuda')
+    valid=torch.tensor([[True,True,False],[True,True,True]],device='cuda')
+    values=torch.randn(2,3,2,3,device='cuda',requires_grad=True)
+    actual=sparse_query_attention(q,k,v,centers,keys,valid,values,scale=64**-.5)
+    rows=torch.zeros(2,3,2,196,device='cuda').scatter_add(
+        -1,keys[None,None].expand(2,3,-1,-1),values*valid)
+    bias=torch.zeros(2,3,196,196,device='cuda').index_copy(2,centers,rows)
+    expected=(((q.float()@k.float().transpose(-2,-1))*64**-.5+bias)
+              .softmax(-1)@v.float())
+    torch.testing.assert_close(actual.float(),expected,atol=.002,rtol=.01)
+    coeff=torch.randn_like(expected)
+    for x in (q,k,v,values):
+        a=torch.autograd.grad((actual*coeff).sum(),x,retain_graph=True)[0]
+        b=torch.autograd.grad((expected*coeff).sum(),x,retain_graph=True)[0]
+        torch.testing.assert_close(a.float(),b.float(),atol=.006,rtol=.03)
