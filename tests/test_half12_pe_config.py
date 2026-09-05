@@ -19,10 +19,11 @@ def test_half12_only_changes_direction_grid_and_run_identity():
     assert old == new
 
 
-def test_half7_twenty_epoch_keeps_smoke_model_and_training_controls():
+@pytest.mark.parametrize('d,r', [(7,5),(3,3)])
+def test_twenty_epoch_keeps_smoke_model_and_training_controls(d,r):
     root = Path(__file__).resolve().parents[1] / 'configs/imagenet100'
-    old = json.loads((root / 'deit_tiny_rot_hex_harmonic_softmax_pe_half7_compact_r5_ddp_e5.json').read_text())
-    new = json.loads((root / 'deit_tiny_rot_hex_harmonic_softmax_pe_half7_compact_r5_ddp_e20.json').read_text())
+    old = json.loads((root / f'deit_tiny_rot_hex_harmonic_softmax_pe_half{d}_compact_r{r}_ddp_e5.json').read_text())
+    new = json.loads((root / f'deit_tiny_rot_hex_harmonic_softmax_pe_half{d}_compact_r{r}_ddp_e20.json').read_text())
     assert new['epochs'] == 20 and new['resume'] is None
     assert new['experiment_name'] != old['experiment_name']
     for key in ('epochs', 'experiment_name'):
