@@ -49,6 +49,9 @@ def build_imagenet100_model(
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
     center_look_layers_per_probe: int = 1,
+    image_look_probes: int = 1,
+    feature_look_probes: int = 1,
+    feature_look_rotating_probes: bool = False,
     feature_ring_look: bool = False,
     feature_ring_start_layer: int = 0,
     feature_ring_group_size: int = 4,
@@ -136,6 +139,9 @@ def build_imagenet100_model(
                 "rot_hex_harmonic_pe_look_center_grid_look",
             },
             center_look_layers_per_probe=center_look_layers_per_probe,
+            image_look_probes=image_look_probes,
+            feature_look_probes=feature_look_probes,
+            feature_look_rotating_probes=feature_look_rotating_probes,
             feature_ring_look=(
                 feature_ring_look
                 or variant in {

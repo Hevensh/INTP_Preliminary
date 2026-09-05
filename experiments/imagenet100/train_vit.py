@@ -71,6 +71,9 @@ class TrainConfig:
     rot_angular_bins_per_radius: int = 4
     look_compact_variable_rings: bool = False
     center_look_layers_per_probe: int = 1
+    image_look_probes: int = 1
+    feature_look_probes: int = 1
+    feature_look_rotating_probes: bool = False
     feature_ring_look: bool = False
     feature_ring_start_layer: int = 0
     feature_ring_group_size: int = 4
@@ -146,6 +149,8 @@ def _validate_config(config: TrainConfig) -> None:
         raise ValueError("rot_angular_bins_per_radius must be positive")
     if config.center_look_layers_per_probe <= 0:
         raise ValueError("center_look_layers_per_probe must be positive")
+    if min(config.image_look_probes, config.feature_look_probes) <= 0:
+        raise ValueError("Look probe counts must be positive")
     if min(
         config.gmr_hidden_channels,
         config.arc_kernel_number,
@@ -610,12 +615,16 @@ def main() -> None:
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--center-look-layers-per-probe", type=int)
+    parser.add_argument("--image-look-probes", type=int)
+    parser.add_argument("--feature-look-probes", type=int)
+    parser.add_argument("--feature-look-rotating-probes", action="store_true", default=None)
     parser.add_argument("--resume")
     args = parser.parse_args()
     config = _load_config(args.config)
     for name in (
         "experiment_name", "data_root", "output_root", "epochs", "batch_size",
-        "center_look_layers_per_probe", "resume"
+        "center_look_layers_per_probe", "resume", "image_look_probes",
+        "feature_look_probes", "feature_look_rotating_probes"
     ):
         value = getattr(args, name)
         if value is not None:
@@ -708,6 +717,9 @@ def main() -> None:
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
         look_compact_variable_rings=config.look_compact_variable_rings,
         center_look_layers_per_probe=config.center_look_layers_per_probe,
+        image_look_probes=config.image_look_probes,
+        feature_look_probes=config.feature_look_probes,
+        feature_look_rotating_probes=config.feature_look_rotating_probes,
         feature_ring_look=config.feature_ring_look,
         feature_ring_start_layer=config.feature_ring_start_layer,
         feature_ring_group_size=config.feature_ring_group_size,

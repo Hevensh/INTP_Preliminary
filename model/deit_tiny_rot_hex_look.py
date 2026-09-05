@@ -9,6 +9,7 @@ from layers.hex_differentiated_harmonic_patch_embed import (
 )
 from layers.center_pose_angular_look import CenterPoseAngularLook
 from layers.center_pose_grid_look import CenterPoseGridLook
+from layers.multiprobe_look import RotatingMultiProbeLook, aggregate_pose_grids, sample_pose_grids
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
@@ -41,6 +42,9 @@ class DeiTTinyRotHexLook(nn.Module):
         center_pose_look: bool = False,
         center_pose_grid_look: bool = False,
         center_look_layers_per_probe: int = 1,
+        image_look_probes: int = 1,
+        feature_look_probes: int = 1,
+        feature_look_rotating_probes: bool = False,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
         feature_ring_group_size: int = 4,
@@ -55,6 +59,20 @@ class DeiTTinyRotHexLook(nn.Module):
         self.embed_dim = 192
         self.depth = 12
         self.num_heads = 3
+        if min(image_look_probes, feature_look_probes) < 1:
+            raise ValueError("Look probe counts must be positive")
+        if feature_look_probes != 1 and not feature_look_rotating_probes:
+            raise ValueError("multiple Feature probes require rotating probes")
+        if feature_look_rotating_probes and not center_pose_grid_look:
+            raise ValueError("rotating Feature probes require grid Feature Look")
+        self.image_look_probes = image_look_probes
+        self.grid_first_look = image_look_probes > 1 or feature_look_rotating_probes
+        if self.grid_first_look and (global_directions != 12 or len(kernel_sizes) != 2):
+            raise ValueError("grid-first experiment currently requires a 4x12 Look grid")
+        if self.grid_first_look and feature_ring_look:
+            raise ValueError("grid-first experiment does not include legacy ring Look")
+        if self.grid_first_look and center_pose_look and not center_pose_grid_look:
+            raise ValueError("grid-first experiment requires grid rather than legacy axial Feature Look")
         self.use_pos_embed = bool(use_pos_embed)
         tokenizer_type = (
             HexDifferentiatedHarmonicPatchEmbed
@@ -137,7 +155,7 @@ class DeiTTinyRotHexLook(nn.Module):
             image_size=image_size,
             patch_size=16,
             in_channels=3,
-            num_heads=self.depth * self.num_heads,
+            num_heads=self.depth * self.num_heads * image_look_probes,
             prototype_radial_bins=(12 if look_compact_variable_rings else 8),
             # Preserve two stored polar samples per full-period pose.  The
             # default 4/8 half-circle search therefore remains 16 bins, while
@@ -167,7 +185,7 @@ class DeiTTinyRotHexLook(nn.Module):
             # block's CLS output.  Keep Center Look on the first 11 blocks;
             # the image Look branch, when present, still spans all 12.
             center_builder = (
-                CenterPoseGridLook
+                (RotatingMultiProbeLook if feature_look_rotating_probes else CenterPoseGridLook)
                 if self.center_pose_grid_look
                 else CenterPoseAngularLook
             )
@@ -179,6 +197,8 @@ class DeiTTinyRotHexLook(nn.Module):
                     "look_radius": 4.0,
                     "layers_per_probe": center_look_layers_per_probe,
                 }
+                if feature_look_rotating_probes:
+                    center_kwargs["probes"] = feature_look_probes
             self.center_look = center_builder(
                 coordinates=patch_coordinates,
                 embed_dim=self.embed_dim,
@@ -233,7 +253,7 @@ class DeiTTinyRotHexLook(nn.Module):
                 rings, coverage = self.look_bank.extract_rings(
                     image.float(), track_input_grad=False
                 )
-                fields = self.look_bank.transformed_look_grids()
+                fields = None if self.grid_first_look else self.look_bank.transformed_look_grids()
                 if not self.look_bank.compact_variable_rings:
                     # Preserve the established dense-ring baseline exactly.
                     pose_weights = self.look_bank.pose_weights(rings, coverage)
@@ -241,13 +261,54 @@ class DeiTTinyRotHexLook(nn.Module):
                 # Restore the caller's AMP context for the large K24/K12 GEMMs.
                 # pose_weights() promotes only the small routing softmax to fp32.
                 pose_weights = self.look_bank.pose_weights(rings, coverage)
-            pose_weights = pose_weights.flatten(-2)
-            fields = fields.flatten(1, 2)
+            if not self.grid_first_look:
+                pose_weights = pose_weights.flatten(-2)
+                fields = fields.flatten(1, 2)
         else:
             pose_weights = fields = None
         stage_ring_biases = None
         for layer_index, block in enumerate(self.blocks):
             layer_pose = layer_fields = None
+            if self.grid_first_look:
+                dense_bias = None
+                grids = None
+                if self.look_bank is not None:
+                    count = self.num_heads * self.image_look_probes
+                    start = layer_index * count
+                    p = pose_weights[:, :, start:start+count]
+                    p = p.reshape(*p.shape[:2], self.num_heads, self.image_look_probes, *p.shape[-2:])
+                    grid = self.look_bank.look_grid[start:start+count].reshape(
+                        self.num_heads, self.image_look_probes, self.look_radial_bins, self.look_direction_bins)
+                    grids = aggregate_pose_grids(p, grid, period=self.look_direction_bins)
+                if self.center_look is not None and layer_index < self.center_look.depth:
+                    cp = self.center_look.pose_for_layer(shared_pose, layer_index)
+                    if isinstance(self.center_look, RotatingMultiProbeLook):
+                        center_grid = self.center_look.pose_grids(cp, layer_index)
+                        if grids is not None:
+                            # Both branches' radius-4 fields share spatial sampling.
+                            # Add before interpolation: 2 large samplings, not 2+1.
+                            grids = torch.cat((grids[:, :, :, :1] + center_grid,
+                                               grids[:, :, :, 1:]), dim=3)
+                            cb = None
+                        else:
+                            cb = sample_pose_grids(center_grid, self.center_look, image=False)
+                    else:
+                        cb = torch.einsum("bqha,haqk->bhqk", cp, self.center_look.fields(layer_index, dtype=cp.dtype))
+                    if cb is not None:
+                        dense_bias = cb if dense_bias is None else dense_bias + cb
+                if grids is not None:
+                    ib = sample_pose_grids(grids, self.look_bank, image=True)
+                    dense_bias = ib if dense_bias is None else dense_bias + ib
+                if dense_bias is not None:
+                    # Keep the existing fused attention and its dense-bias backward.
+                    # A zero singleton structured term avoids any M-dependent pose loop.
+                    n = tokens.shape[1] - 1
+                    zero_pose = tokens.new_zeros(tokens.shape[0], n, self.num_heads, 1)
+                    zero_field = tokens.new_zeros(self.num_heads, 1, n, n)
+                    tokens = block(tokens, structured_look=(zero_pose, zero_field, dense_bias))
+                else:
+                    tokens = block(tokens)
+                continue
             if self.look_bank is not None:
                 start = layer_index * self.num_heads
                 stop = start + self.num_heads
@@ -314,7 +375,8 @@ class DeiTTinyRotHexLook(nn.Module):
             if self.center_pose_grid_look
             else "center_pose_angular_look"
         )
-        return {name: self.center_look.diagnostics()}
+        return {name: self.center_look.diagnostics(), "image_look_probes": self.image_look_probes,
+                "grid_first_look": self.grid_first_look}
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return self.head(self.forward_features(image)[:, 0])
