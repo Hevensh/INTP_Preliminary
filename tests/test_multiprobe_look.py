@@ -1,6 +1,6 @@
 import pytest
 import torch
-from layers.multiprobe_look import RotatingMultiProbeLook, aggregate_pose_grids, sample_pose_grids
+from layers.multiprobe_look import RotatingMultiProbeLook, IndependentMultiProbeLook, aggregate_pose_grids, sample_pose_grids
 from layers.center_pose_grid_look import CenterPoseGridLook
 
 
@@ -71,6 +71,50 @@ def test_null_is_not_renormalized_away():
     m = make()
     m.null_score.data.fill_(30)
     assert m.pose_weights(torch.zeros(1,9,12)).sum(-1).max() < 1e-10
+
+
+def test_independent_scores_and_gradients_match_explicit_direction_loop():
+    m = IndependentMultiProbeLook(coordinates=torch.randn(9,2), embed_dim=12,
+        num_heads=3, depth=2, axes=6, probes=4).double()
+    x = torch.randn(2,9,12,dtype=torch.double,requires_grad=True)
+    grouped = x.reshape(2,9,3,2,2)
+    score = torch.stack([torch.einsum('bqhpc,ghmpc->bqghm',grouped,m.axis_weight[:,:,:,a])
+                         +m.axis_bias[:,:,:,a] for a in range(6)],dim=-1)
+    null=m.null_score[None,None,...,None].expand(*score.shape[:-1],1)
+    expected=torch.cat((score,null),-1).float().softmax(-1)[...,:-1].double()
+    actual=m.pose_weights(x)
+    torch.testing.assert_close(actual,expected)
+    coeff=torch.randn_like(actual)
+    for p in (x,m.axis_weight,m.axis_bias,m.null_score):
+        a=torch.autograd.grad((actual*coeff).sum(),p,retain_graph=True)[0]
+        b=torch.autograd.grad((expected*coeff).sum(),p,retain_graph=True)[0]
+        torch.testing.assert_close(a,b)
+    m.null_score.data.fill_(40)
+    assert m.pose_weights(torch.zeros_like(x)).sum(-1).max()<1e-12
+    assert not m.diagnostics()['rotating_shared_weights']
+
+
+def test_independent_m4_model_roundtrip_and_backward():
+    from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
+    kwargs=dict(use_pos_embed=True,image_size=48,directions=6,global_directions=12,
+        angular_bins_per_radius=3,look_compact_variable_rings=True,
+        center_pose_grid_look=True,center_look_layers_per_probe=3,
+        image_look_probes=4,feature_look_probes=4,feature_look_rotating_probes=False,
+        progressive_differentiation=True)
+    model=DeiTTinyRotHexLook(**kwargs)
+    assert isinstance(model.center_look,IndependentMultiProbeLook)
+    assert model.center_look.axis_weight.shape==(4,3,4,6,32,2)
+    with torch.no_grad():
+        model.center_look.look_grid.normal_(std=.02)
+        model.look_bank.look_grid.normal_(std=.02)
+    x=torch.randn(1,3,48,48)
+    y=model(x)
+    y.square().mean().backward()
+    assert model.center_look.axis_weight.grad.abs().sum()>0
+    assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+    restored=DeiTTinyRotHexLook(**kwargs)
+    restored.load_state_dict(model.state_dict())
+    torch.testing.assert_close(restored(x),y)
 
 
 def test_image_two_scales_grid_first_values_and_gradients():

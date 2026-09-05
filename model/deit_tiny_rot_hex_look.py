@@ -9,7 +9,7 @@ from layers.hex_differentiated_harmonic_patch_embed import (
 )
 from layers.center_pose_angular_look import CenterPoseAngularLook
 from layers.center_pose_grid_look import CenterPoseGridLook
-from layers.multiprobe_look import RotatingMultiProbeLook, aggregate_pose_grids, sample_pose_grids
+from layers.multiprobe_look import RotatingMultiProbeLook, IndependentMultiProbeLook, aggregate_pose_grids, sample_pose_grids
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
@@ -61,12 +61,11 @@ class DeiTTinyRotHexLook(nn.Module):
         self.num_heads = 3
         if min(image_look_probes, feature_look_probes) < 1:
             raise ValueError("Look probe counts must be positive")
-        if feature_look_probes != 1 and not feature_look_rotating_probes:
-            raise ValueError("multiple Feature probes require rotating probes")
-        if feature_look_rotating_probes and not center_pose_grid_look:
-            raise ValueError("rotating Feature probes require grid Feature Look")
+        multi_feature = feature_look_rotating_probes or feature_look_probes > 1
+        if multi_feature and not center_pose_grid_look:
+            raise ValueError("multiple/rotating Feature probes require grid Feature Look")
         self.image_look_probes = image_look_probes
-        self.grid_first_look = image_look_probes > 1 or feature_look_rotating_probes
+        self.grid_first_look = image_look_probes > 1 or multi_feature
         if self.grid_first_look and (global_directions != 12 or len(kernel_sizes) != 2):
             raise ValueError("grid-first experiment currently requires a 4x12 Look grid")
         if self.grid_first_look and feature_ring_look:
@@ -185,7 +184,8 @@ class DeiTTinyRotHexLook(nn.Module):
             # block's CLS output.  Keep Center Look on the first 11 blocks;
             # the image Look branch, when present, still spans all 12.
             center_builder = (
-                (RotatingMultiProbeLook if feature_look_rotating_probes else CenterPoseGridLook)
+                (RotatingMultiProbeLook if feature_look_rotating_probes else
+                 IndependentMultiProbeLook if feature_look_probes > 1 else CenterPoseGridLook)
                 if self.center_pose_grid_look
                 else CenterPoseAngularLook
             )
@@ -197,7 +197,7 @@ class DeiTTinyRotHexLook(nn.Module):
                     "look_radius": 4.0,
                     "layers_per_probe": center_look_layers_per_probe,
                 }
-                if feature_look_rotating_probes:
+                if multi_feature:
                     center_kwargs["probes"] = feature_look_probes
             self.center_look = center_builder(
                 coordinates=patch_coordinates,

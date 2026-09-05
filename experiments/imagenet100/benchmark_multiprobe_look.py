@@ -20,7 +20,8 @@ def main():
     torch.set_num_threads(4)
     results=[]
     for name,im,fm,rot in (("legacy",1,1,False),("rotating_m1_m1",1,1,True),
-                            ("rotating_m1_m4",1,4,True),("rotating_m4_m4",4,4,True)):
+                            ("rotating_m1_m4",1,4,True),("rotating_m4_m4",4,4,True),
+                            ("independent_m4_m4",4,4,False)):
         torch.manual_seed(0)
         model=DeiTTinyRotHexLook(use_pos_embed=True,directions=6,global_directions=12,
             angular_bins_per_radius=3,look_compact_variable_rings=True,

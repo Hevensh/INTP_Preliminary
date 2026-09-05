@@ -93,3 +93,28 @@ class RotatingMultiProbeLook(CenterPoseGridLook):
                 "look_grid_shape": list(self.look_grid.shape),
                 "layer_mean_abs_grid": self.look_grid.detach().float().abs().mean((1,2,3,4)).cpu().tolist(),
                 "null_score": self.null_score.detach().float().cpu().tolist()}
+
+
+class IndependentMultiProbeLook(RotatingMultiProbeLook):
+    """Each head/probe/direction owns W; only output-grid rotations are shared.
+
+    Retains per-probe null-softmax and grid-first averaging/interpolation.
+    """
+    def __init__(self, *, probes=4, **kwargs):
+        super().__init__(probes=probes, **kwargs)
+        shape = (self.probe_groups, self.num_heads, self.probes, self.axes)
+        self.axis_weight = nn.Parameter(torch.randn(*shape, self.pairs_per_head, 2)
+                                        / math.sqrt(2 * self.pairs_per_head))
+        self.axis_bias = nn.Parameter(torch.zeros(*shape))
+
+    def pose_weights(self, tokens):
+        grouped = tokens.reshape(*tokens.shape[:2], self.num_heads, self.pairs_per_head, 2)
+        score = torch.einsum("bqhpc,ghmapc->bqghma", grouped, self.axis_weight) + self.axis_bias
+        null = self.null_score[None, None, ..., None].expand(*score.shape[:-1], 1)
+        return torch.cat((score, null), -1).float().softmax(-1)[..., :-1].to(tokens.dtype)
+
+    def diagnostics(self):
+        result = super().diagnostics()
+        result.update(rotating_shared_weights=False, independent_direction_weights=True,
+                      axis_weight_shape=list(self.axis_weight.shape))
+        return result
