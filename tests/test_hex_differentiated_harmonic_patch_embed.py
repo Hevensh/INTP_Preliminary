@@ -1,4 +1,5 @@
 import torch
+import pytest
 
 from experiments.imagenet100.differentiation_optimizer import (
     rebuild_adamw_and_scheduler,
@@ -53,7 +54,7 @@ def test_three_stage_differentiation_keeps_output_slots_stable():
     assert all(parameter.grad is not None for parameter in tokenizer.prototype_bank)
 
 
-def test_color_uses_two_scale_one_hot_output_with_null_attenuation():
+def test_manual_color_differentiation_is_rejected_without_mutation():
     tokenizer = build_tokenizer(bases=1)
     plan = {
         "target_full_count": 0,
@@ -68,12 +69,9 @@ def test_color_uses_two_scale_one_hot_output_with_null_attenuation():
             }
         ],
     }
-    tokenizer.apply_differentiation(plan)
-    output = tokenizer(torch.randn(1, 3, 32, 32)).view(
-        1, tokenizer.num_patches, 1, 2
-    )
-    assert (output >= 0).all()
-    assert (output.sum(-1) <= 1.0 + 1e-6).all()
+    with pytest.raises(ValueError, match="color is excluded"):
+        tokenizer.apply_differentiation(plan)
+    assert tokenizer.family_name(0) == 'full'
 
 
 def test_new_differentiation_plans_exclude_color_even_for_uniform_prototypes():

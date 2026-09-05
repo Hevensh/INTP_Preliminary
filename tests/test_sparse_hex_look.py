@@ -38,13 +38,13 @@ def test_sparse_attention_matches_dense_values_and_all_gradients():
         torch.testing.assert_close(a,b,atol=4e-6,rtol=3e-5)
 
 
-@pytest.mark.parametrize('G',[1,3,12])
-def test_sparse_model_forward_backward_and_roundtrip(G):
+@pytest.mark.parametrize('G,differentiate',[(1,True),(3,True),(12,True),(3,False)])
+def test_sparse_model_forward_backward_and_roundtrip(G,differentiate):
     from model.deit_tiny_rot_hex_look import DeiTTinyRotHexLook
     kw=dict(use_pos_embed=True,image_size=48,directions=6,global_directions=12,
         angular_bins_per_radius=3,look_compact_variable_rings=True,center_pose_grid_look=True,
         center_look_layers_per_probe=G,image_look_probes=4,feature_look_probes=4,
-        sparse_hex_look=True,progressive_differentiation=True)
+        sparse_hex_look=True,progressive_differentiation=differentiate)
     m=DeiTTinyRotHexLook(**kw)
     n=len(m.sparse_layout.centers)
     assert all(g.sample_x.shape[0]==n for g in m.look_bank.compact_geometries)

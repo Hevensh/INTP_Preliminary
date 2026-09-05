@@ -468,16 +468,16 @@ class HexDifferentiatedHarmonicPatchEmbed(nn.Module):
     def apply_differentiation(
         self, plan: dict[str, Any]
     ) -> tuple[dict[str, Any], list[PrototypeConversion]]:
+        # Validate before mutating any prototype, including externally supplied plans.
+        if any(a["family"] not in ("angular", "stripe") for a in plan["assignments"]):
+            raise ValueError("new differentiation only supports angular / stripe; color is excluded")
         conversions: list[PrototypeConversion] = []
         for assignment in plan["assignments"]:
             base = int(assignment["base_id"])
             family = str(assignment["family"])
             if self.family_name(base) != "full":
                 raise ValueError(f"base {base} is already {self.family_name(base)}")
-            if family == "color":
-                transform = self.full_to_color
-                shape = (3,)
-            elif family == "angular":
+            if family == "angular":
                 transform = self.full_to_angular
                 shape = (3, self.angular_bins)
             elif family == "stripe":

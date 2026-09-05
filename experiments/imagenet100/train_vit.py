@@ -620,13 +620,15 @@ def main() -> None:
     parser.add_argument("--feature-look-probes", type=int)
     parser.add_argument("--feature-look-rotating-probes", action="store_true", default=None)
     parser.add_argument("--sparse-hex-look", action="store_true", default=None)
+    parser.add_argument("--rot-progressive-differentiation", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--resume")
     args = parser.parse_args()
     config = _load_config(args.config)
     for name in (
         "experiment_name", "data_root", "output_root", "epochs", "batch_size",
         "center_look_layers_per_probe", "resume", "image_look_probes",
-        "feature_look_probes", "feature_look_rotating_probes", "sparse_hex_look"
+        "feature_look_probes", "feature_look_rotating_probes", "sparse_hex_look",
+        "rot_progressive_differentiation"
     ):
         value = getattr(args, name)
         if value is not None:
