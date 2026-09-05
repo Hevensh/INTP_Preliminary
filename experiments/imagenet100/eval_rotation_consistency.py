@@ -119,6 +119,7 @@ def _build_model(config: TrainConfig, device: torch.device) -> torch.nn.Module:
         image_look_probes=config.image_look_probes,
         feature_look_probes=config.feature_look_probes,
         feature_look_rotating_probes=config.feature_look_rotating_probes,
+        sparse_hex_look=config.sparse_hex_look,
         feature_ring_look=config.feature_ring_look,
         feature_ring_start_layer=config.feature_ring_start_layer,
         feature_ring_group_size=config.feature_ring_group_size,

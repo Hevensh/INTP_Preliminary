@@ -13,6 +13,7 @@ from layers.multiprobe_look import RotatingMultiProbeLook, IndependentMultiProbe
 from layers.mini_vit import TransformerBlock, init_vit_weights
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 from layers.two_ring_circular_look import TwoRingCircularLookMatcher
+from layers.sparse_hex_look import SparseHexLookLayout
 
 
 class DeiTTinyRotHexLook(nn.Module):
@@ -45,6 +46,7 @@ class DeiTTinyRotHexLook(nn.Module):
         image_look_probes: int = 1,
         feature_look_probes: int = 1,
         feature_look_rotating_probes: bool = False,
+        sparse_hex_look: bool = False,
         feature_ring_look: bool = False,
         feature_ring_start_layer: int = 0,
         feature_ring_group_size: int = 4,
@@ -59,6 +61,12 @@ class DeiTTinyRotHexLook(nn.Module):
         self.embed_dim = 192
         self.depth = 12
         self.num_heads = 3
+        self.sparse_hex_look = bool(sparse_hex_look)
+        if sparse_hex_look and (not center_pose_grid_look or not image_look or
+                feature_look_probes < 2 or not look_compact_variable_rings or
+                directions != 6 or global_directions != 12 or tuple(kernel_sizes)!=(24,12)
+                or feature_ring_look):
+            raise ValueError('sparse Hex Look requires dual multi-probe half6 compact K24/K12')
         if min(image_look_probes, feature_look_probes) < 1:
             raise ValueError("Look probe counts must be positive")
         multi_feature = feature_look_rotating_probes or feature_look_probes > 1
@@ -230,7 +238,51 @@ class DeiTTinyRotHexLook(nn.Module):
         else:
             self.feature_ring_matcher = None
 
+        if self.sparse_hex_look:
+            self.sparse_layout = SparseHexLookLayout(patch_coordinates, axes=directions)
+            # Only image Look sampling is reduced. Tokenizer still samples every token.
+            centers = self.sparse_layout.centers
+            for geometry in self.look_bank.compact_geometries:
+                geometry.sample_x = geometry.sample_x.index_select(0, centers)
+                geometry.sample_y = geometry.sample_y.index_select(0, centers)
+            # One stored two-ring template per probe. Input scale chooses a ring.
+            self.look_bank.look_grid = nn.Parameter(torch.zeros(
+                self.depth*self.num_heads*image_look_probes, 18))
+            self.center_look.look_grid = nn.Parameter(torch.zeros(
+                self.depth-1, self.num_heads, feature_look_probes, 18))
+
+    def _forward_sparse_features(self, image):
+        layout=self.sparse_layout
+        tokens=self.patch_embed(image)
+        center_tokens=(tokens-self.patch_embed.output_bias).index_select(1,layout.centers)
+        feature_groups=self.center_look.pose_weights(center_tokens).unbind(2)
+        with torch.autocast(device_type=image.device.type,enabled=False):
+            rings,coverage=self.look_bank.extract_rings(image.float(),track_input_grad=False)
+        image_pose=self.look_bank.pose_weights(rings,coverage)
+        image_layers=image_pose.reshape(*image_pose.shape[:2],self.depth,self.num_heads,
+                                       self.image_look_probes,2,6).unbind(2)
+        image_templates=self.look_bank.look_grid.reshape(
+            self.depth,self.num_heads,self.image_look_probes,18).unbind(0)
+        feature_templates=self.center_look.look_grid.unbind(0)
+        tokens=torch.cat((self.cls_token.expand(tokens.shape[0],-1,-1),tokens),1)
+        if self.pos_embed is not None: tokens=tokens+self.pos_embed
+        tokens=self.pos_drop(tokens)
+        for layer,block in enumerate(self.blocks):
+            p=image_layers[layer]
+            # K24 -> outer 12; K12 -> inner 6. No re-normalization after null.
+            large=layout.aggregate(p[...,0,:],image_templates[layer])
+            small=layout.aggregate(p[...,1,:],image_templates[layer])
+            values=torch.cat((small[...,:6],large[...,6:]),-1)
+            if layer<self.center_look.depth:
+                cp=feature_groups[layer//self.center_look.layers_per_probe]
+                values=values+layout.aggregate(cp,feature_templates[layer])
+            tokens=block(tokens,sparse_look=(layout.centers+1,layout.keys+1,layout.valid,
+                                             values,layout.ordinary_queries))
+        return self.norm(tokens)
+
     def forward_features(self, image: torch.Tensor) -> torch.Tensor:
+        if self.sparse_hex_look:
+            return self._forward_sparse_features(image)
         tokens = self.patch_embed(image)
         if self.center_look is not None:
             # Remove the ordinary output bias before interpreting adjacent
@@ -378,6 +430,21 @@ class DeiTTinyRotHexLook(nn.Module):
         return self.norm(tokens)
 
     def experiment_diagnostics(self) -> dict[str, object]:
+        if self.sparse_hex_look:
+            layout=self.sparse_layout
+            return {'sparse_hex_look':True,'query_count':len(layout.centers),
+                    'token_count':self.patch_embed.num_patches,
+                    'center_indices':layout.centers.cpu().tolist(),
+                    'center_axial':layout.axial[layout.centers].cpu().tolist(),
+                    'neighbor_indices':layout.keys.cpu().tolist(),
+                    'neighbor_valid':layout.valid.cpu().tolist(),
+                    'rotation_permutations':layout.permutations.cpu().tolist(),
+                    'scale_mapping':{'K12':'inner6','K24':'outer12'},
+                    'image_probes':self.image_look_probes,'feature_probes':self.center_look.probes,
+                    'feature_rotating_W':not isinstance(self.center_look,IndependentMultiProbeLook),
+                    'G':self.center_look.layers_per_probe,
+                    'image_template':self.look_bank.look_grid.detach().float().cpu().tolist(),
+                    'feature_template':self.center_look.look_grid.detach().float().cpu().tolist()}
         if self.center_look is None:
             return {}
         name = (

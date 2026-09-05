@@ -74,6 +74,7 @@ class TrainConfig:
     image_look_probes: int = 1
     feature_look_probes: int = 1
     feature_look_rotating_probes: bool = False
+    sparse_hex_look: bool = False
     feature_ring_look: bool = False
     feature_ring_start_layer: int = 0
     feature_ring_group_size: int = 4
@@ -618,13 +619,14 @@ def main() -> None:
     parser.add_argument("--image-look-probes", type=int)
     parser.add_argument("--feature-look-probes", type=int)
     parser.add_argument("--feature-look-rotating-probes", action="store_true", default=None)
+    parser.add_argument("--sparse-hex-look", action="store_true", default=None)
     parser.add_argument("--resume")
     args = parser.parse_args()
     config = _load_config(args.config)
     for name in (
         "experiment_name", "data_root", "output_root", "epochs", "batch_size",
         "center_look_layers_per_probe", "resume", "image_look_probes",
-        "feature_look_probes", "feature_look_rotating_probes"
+        "feature_look_probes", "feature_look_rotating_probes", "sparse_hex_look"
     ):
         value = getattr(args, name)
         if value is not None:
@@ -720,6 +722,7 @@ def main() -> None:
         image_look_probes=config.image_look_probes,
         feature_look_probes=config.feature_look_probes,
         feature_look_rotating_probes=config.feature_look_rotating_probes,
+        sparse_hex_look=config.sparse_hex_look,
         feature_ring_look=config.feature_ring_look,
         feature_ring_start_layer=config.feature_ring_start_layer,
         feature_ring_group_size=config.feature_ring_group_size,

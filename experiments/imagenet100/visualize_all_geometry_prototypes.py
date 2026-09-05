@@ -58,6 +58,7 @@ def _build_model(config: dict[str, Any]) -> torch.nn.Module:
         image_look_probes=int(config.get("image_look_probes", 1)),
         feature_look_probes=int(config.get("feature_look_probes", 1)),
         feature_look_rotating_probes=bool(config.get("feature_look_rotating_probes", False)),
+        sparse_hex_look=bool(config.get("sparse_hex_look", False)),
         feature_ring_look=bool(config.get("feature_ring_look", False)),
         feature_ring_start_layer=int(config.get("feature_ring_start_layer", 0)),
         feature_ring_group_size=int(config.get("feature_ring_group_size", 4)),

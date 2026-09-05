@@ -12,6 +12,10 @@ case "$FEATURE_MODE" in
   independent) MODE_TAG=indW ;;
   *) echo "FEATURE_MODE must be rotating or independent" >&2; exit 2 ;;
 esac
+if [[ "${SPARSE_HEX_LOOK:-0}" == 1 ]]; then
+  MODE_TAG="${MODE_TAG}_sparsehex18"
+  FEATURE_ARGS+=(--sparse-hex-look)
+fi
 G="${G:-3}"
 EPOCHS="${EPOCHS:-20}"
 DATA_ROOT="${DATA_ROOT:-/kaggle/input/datasets/ambityga/imagenet100}"

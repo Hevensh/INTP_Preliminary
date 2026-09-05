@@ -63,13 +63,14 @@ class MultiHeadSelfAttention(nn.Module):
         x: torch.Tensor,
         attn_bias: torch.Tensor | None = None,
         structured_look: tuple[torch.Tensor, ...] | None = None,
+        sparse_look: tuple[torch.Tensor, ...] | None = None,
     ) -> torch.Tensor:
         bsz, seq_len, dim = x.shape
         qkv = self.qkv(x)  # (B, N, 3D)
         qkv = qkv.reshape(bsz, seq_len, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # (B, H, N, Hd)
 
-        if attn_bias is not None and structured_look is not None:
+        if sum(x is not None for x in (attn_bias,structured_look,sparse_look))>1:
             raise ValueError("attn_bias and structured_look are mutually exclusive")
         if attn_bias is not None:
             static_shape = (self.num_heads, seq_len, seq_len)
@@ -85,7 +86,11 @@ class MultiHeadSelfAttention(nn.Module):
             # dynamically constructed per-layer look bias may be non-contiguous.
             attn_bias = attn_bias.to(device=x.device, dtype=q.dtype).contiguous()
 
-        if structured_look is not None:
+        if sparse_look is not None:
+            from layers.sparse_hex_look import sparse_query_attention
+            out=sparse_query_attention(q,k,v,*sparse_look,scale=self.scale,
+                dropout_p=self.attn_dropout if self.training else 0.)
+        elif structured_look is not None:
             from layers.triton_structured_look_attention import structured_look_attention
 
             if len(structured_look) == 2:
@@ -152,13 +157,14 @@ class TransformerBlock(nn.Module):
         attn_bias: torch.Tensor | None = None,
         structured_look: tuple[torch.Tensor, ...] | None = None,
         norm1_input: torch.Tensor | None = None,
+        sparse_look: tuple[torch.Tensor, ...] | None = None,
     ) -> torch.Tensor:
         if norm1_input is None:
             norm1_input = self.norm1(x)
         elif norm1_input.shape != x.shape:
             raise ValueError("norm1_input must have the same shape as x")
         x = x + self.attn(
-            norm1_input, attn_bias=attn_bias, structured_look=structured_look
+            norm1_input, attn_bias=attn_bias, structured_look=structured_look, sparse_look=sparse_look
         )
         x = x + self.mlp(self.norm2(x))
         return x
