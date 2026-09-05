@@ -24,6 +24,7 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         bases: int = 96,
         directions: int = 4,
         global_directions: int = 8,
+        direction_angles_degrees: tuple[float, ...] | None = None,
         radial_bins: int = 12,
         angular_bins_per_radius: int = 4,
         prototype_chunk_size: int = 16,
@@ -76,6 +77,14 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         self.register_buffer("ring_counts", counts, persistent=False)
         self.register_buffer("ring_offsets", offsets, persistent=False)
         direction_step = 2 * math.pi / global_directions
+        theta = torch.arange(directions) * direction_step
+        if direction_angles_degrees is not None:
+            theta = torch.tensor(direction_angles_degrees, dtype=torch.float32)
+            if theta.shape != (directions,) or not torch.isfinite(theta).all():
+                raise ValueError("direction_angles_degrees must contain directions finite angles")
+            if len(set(float(v) % 360 for v in direction_angles_degrees)) != directions:
+                raise ValueError("direction_angles_degrees must be distinct modulo 360")
+            theta = torch.deg2rad(theta)
         self.renderers = nn.ModuleList(
             _PolarRenderer(
                 geometry,
@@ -84,6 +93,7 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
                 ring_offsets=offsets,
                 directions=directions,
                 direction_step=direction_step,
+                direction_angles=theta,
             )
             for geometry in self.geometries
         )
@@ -106,7 +116,6 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
             cover = raw_cover * (reference_cover_mass / raw_cover.sum())
             self.register_buffer(f"scale_cover_{index}", cover, persistent=False)
 
-        theta = torch.arange(directions) * direction_step
         self.register_buffer(
             "direction_coefficients",
             torch.stack((theta.cos(), theta.sin()), dim=-1),

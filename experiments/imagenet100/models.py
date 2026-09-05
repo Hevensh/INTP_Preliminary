@@ -46,6 +46,7 @@ def build_imagenet100_model(
     rot_bases: int = 96,
     rot_directions: int = 4,
     rot_global_directions: int = 8,
+    rot_direction_angles_degrees: tuple[float, ...] | None = None,
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
     center_look_layers_per_probe: int = 1,
@@ -76,6 +77,12 @@ def build_imagenet100_model(
 
     if variant not in MODEL_VARIANTS:
         raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
+    if rot_direction_angles_degrees is not None and (
+        variant not in {"rot_hex_harmonic_pe", "rot_hex_harmonic_softmax_pe",
+                        "rot_hex_harmonic_l1_softmax_pe"}
+        or rot_progressive_differentiation
+    ):
+        raise ValueError("Custom angles currently require harmonic PE-only without differentiation")
     if variant != "deit_tiny" and pretrained:
         raise ValueError(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
@@ -250,6 +257,7 @@ def build_imagenet100_model(
             "rot_hex_harmonic_l1_softmax_pe",
         }
         patch_embed = HexRotatingHarmonicPatchEmbed(
+            direction_angles_degrees=rot_direction_angles_degrees,
             img_size=image_size,
             in_chans=3,
             embed_dim=embed_dim,

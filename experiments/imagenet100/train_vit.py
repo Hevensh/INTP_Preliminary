@@ -68,6 +68,7 @@ class TrainConfig:
     rot_bases: int = 96
     rot_directions: int = 4
     rot_global_directions: int = 8
+    rot_direction_angles_degrees: tuple[float, ...] | None = None
     rot_angular_bins_per_radius: int = 4
     look_compact_variable_rings: bool = False
     center_look_layers_per_probe: int = 1
@@ -718,6 +719,7 @@ def main() -> None:
         rot_bases=config.rot_bases,
         rot_directions=config.rot_directions,
         rot_global_directions=config.rot_global_directions,
+        rot_direction_angles_degrees=config.rot_direction_angles_degrees,
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
         look_compact_variable_rings=config.look_compact_variable_rings,
         center_look_layers_per_probe=config.center_look_layers_per_probe,

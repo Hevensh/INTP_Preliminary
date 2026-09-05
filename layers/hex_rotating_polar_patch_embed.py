@@ -20,6 +20,7 @@ class _PolarRenderer(nn.Module):
         ring_offsets: torch.Tensor,
         directions: int,
         direction_step: float,
+        direction_angles: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         kernel_size = geometry.kernel_size
@@ -33,7 +34,9 @@ class _PolarRenderer(nn.Module):
 
         def angular_indices(ring: torch.Tensor):
             count = ring_counts[ring]
-            shifts = torch.arange(directions)[:, None] * direction_step / (2 * math.pi)
+            angles = (torch.arange(directions) * direction_step
+                      if direction_angles is None else direction_angles)
+            shifts = angles[:, None] / (2 * math.pi)
             position = torch.remainder(angle_turn[None] - shifts, 1.0) * count[None]
             raw = position.floor()
             a0 = torch.remainder(raw.long(), count[None])
