@@ -267,6 +267,17 @@ class DeiTTinyRotHexLook(nn.Module):
         else:
             pose_weights = fields = None
         stage_ring_biases = None
+        image_layers = feature_groups = None
+        if self.grid_first_look:
+            if pose_weights is not None:
+                # Unbind once: backward stacks layer gradients once instead of
+                # repeatedly zero-filling the entire all-layer response tensor.
+                image_layers = pose_weights.reshape(
+                    *pose_weights.shape[:2], self.depth, self.num_heads,
+                    self.image_look_probes, *pose_weights.shape[-2:]
+                ).unbind(2)
+            if shared_pose is not None:
+                feature_groups = shared_pose.unbind(2)
         for layer_index, block in enumerate(self.blocks):
             layer_pose = layer_fields = None
             if self.grid_first_look:
@@ -275,13 +286,12 @@ class DeiTTinyRotHexLook(nn.Module):
                 if self.look_bank is not None:
                     count = self.num_heads * self.image_look_probes
                     start = layer_index * count
-                    p = pose_weights[:, :, start:start+count]
-                    p = p.reshape(*p.shape[:2], self.num_heads, self.image_look_probes, *p.shape[-2:])
+                    p = image_layers[layer_index]
                     grid = self.look_bank.look_grid[start:start+count].reshape(
                         self.num_heads, self.image_look_probes, self.look_radial_bins, self.look_direction_bins)
                     grids = aggregate_pose_grids(p, grid, period=self.look_direction_bins)
                 if self.center_look is not None and layer_index < self.center_look.depth:
-                    cp = self.center_look.pose_for_layer(shared_pose, layer_index)
+                    cp = feature_groups[layer_index // self.center_look.layers_per_probe]
                     if isinstance(self.center_look, RotatingMultiProbeLook):
                         center_grid = self.center_look.pose_grids(cp, layer_index)
                         if grids is not None:

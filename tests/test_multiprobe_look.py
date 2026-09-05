@@ -4,6 +4,25 @@ from layers.multiprobe_look import RotatingMultiProbeLook, aggregate_pose_grids,
 from layers.center_pose_grid_look import CenterPoseGridLook
 
 
+def test_unbind_layer_and_repeated_group_gradients_match_slices():
+    torch.manual_seed(6)
+    image = torch.randn(2,5,12*3*4,2,6,requires_grad=True)
+    feature = torch.randn(2,5,4,3,4,6,requires_grad=True)
+    layers = image.reshape(2,5,12,3,4,2,6).unbind(2)
+    groups = feature.unbind(2)
+    old = new = 0
+    for i in range(12):
+        old = old + (image[:,:,i*12:(i+1)*12].sin()*(i+1)).sum()
+        new = new + (layers[i].sin()*(i+1)).sum()
+        if i < 11:
+            old = old + (feature[:,:,i//3].cos()*(i+1)).sum()
+            new = new + (groups[i//3].cos()*(i+1)).sum()
+    torch.testing.assert_close(old,new)
+    for tensor in (image,feature):
+        torch.testing.assert_close(torch.autograd.grad(old,tensor,retain_graph=True)[0],
+                                   torch.autograd.grad(new,tensor,retain_graph=True)[0])
+
+
 def make(probes=4, device="cpu"):
     torch.manual_seed(12)
     coords = torch.randn(9, 2)
