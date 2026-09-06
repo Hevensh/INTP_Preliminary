@@ -156,16 +156,16 @@ New coordinates are divided by two so a two-ring window grows in image units.
 
 
 class HexDirectionPyramid(nn.Module):
-    """96/192/288, 2/2/2 blocks. Shared weights across six half-circle slots.
+    """144/288/336, FFN4, 2/2/2 blocks; geometric polar lifting.
 
 Whole-stage query batches remove the small-query loop. Only attention is
 checkpointed, not the FFN, and only in the first two (larger) stages.
 """
     def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True):
         super().__init__()
-        self.embed_dim = 288
+        self.embed_dim = 336
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
-            img_size=image_size, in_chans=3, embed_dim=96, bases=96,
+            img_size=image_size, in_chans=3, embed_dim=144, bases=144,
             directions=6, global_directions=12, angular_bins_per_radius=3,
             raw_direction_output=True, kernel_sizes=(24,12))
         coo = self.patch_embed.coo_patchs
@@ -174,20 +174,20 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         self.stages = nn.ModuleList()
         self.transitions = nn.ModuleList()
         self.token_counts = []
-        for i, (dim, heads) in enumerate(zip((96,192,288),(3,3,3))):
+        for i, (dim, heads) in enumerate(zip((144,288,336),(3,3,3))):
             self.token_counts.append(len(coordinates))
             self.stages.append(nn.Sequential(*[
                 DirectionBlock(coordinates, angles, dim, heads,
                                query_chunk=len(coordinates),
                                checkpoint_attention=checkpoint_attention and i<2,
-                               mlp_ratio=8.25)
+                               mlp_ratio=4.0)
                 for _ in range(2)]))
             if i<2:
-                transition = HexSubsample(coordinates, dim, (192,288)[i])
+                transition = HexSubsample(coordinates, dim, (288,336)[i])
                 self.transitions.append(transition)
                 coordinates = transition.coordinates
-        self.norm = nn.LayerNorm(288, eps=1e-6)
-        self.head = nn.Linear(288, num_classes)
+        self.norm = nn.LayerNorm(336, eps=1e-6)
+        self.head = nn.Linear(336, num_classes)
 
     def forward(self, image):
         x = self.patch_embed(image)
@@ -198,9 +198,10 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         return self.head(self.norm(x).mean(dim=(1,2)))
 
     def experiment_diagnostics(self):
-        return dict(stage_widths=[96,192,288], stage_depths=[2,2,2],
+        return dict(stage_widths=[144,288,336], stage_depths=[2,2,2],
                     stage_heads=[3,3,3], stage_tokens=self.token_counts,
-                    mlp_ratio=8.25, mlp_hidden=[792,1584,2376],
+                    mlp_ratio=4.0, mlp_hidden=[576,1152,1344],
+                    tokenizer_bases=144, tokenizer_storage='variable-ring polar r3',
                     directions_degrees=[0,30,60,90,120,150],
                     neighborhood=19, strict_equivariance=False,
                     downsample='even/even axial selection after two blocks, shared linear',

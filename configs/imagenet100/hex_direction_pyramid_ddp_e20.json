@@ -1,5 +1,5 @@
 {
-  "experiment_name": "hex_direction_pyramid_96_192_288_ffn825_imagenet100_ddp_e20",
+  "experiment_name": "hex_direction_pyramid_144_288_336_ffn4_imagenet100_ddp_e20",
   "data_root": "/kaggle/input/datasets/ambityga/imagenet100",
   "output_root": "/kaggle/working/runs",
   "model": "deit_tiny_patch16_224",

@@ -45,8 +45,9 @@ def test_pyramid_geometry():
         assert a.indices.shape[1] == 19
         assert a.valid.any(-1).all()
         assert a.indices.max() < len(a.indices)
-    assert m.embed_dim == 288
-    assert sum(p.numel() for p in m.parameters()) == 5494660
+    assert m.embed_dim == 336
+    assert m.patch_embed.prototype.shape == (144,3,234)
+    assert [s[0].mlp[0].out_features for s in m.stages] == [576,1152,1344]
 
 
 def test_attention_checkpoint_equivalence():
