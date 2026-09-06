@@ -34,11 +34,15 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         use_null: bool = False,
         null_initial_score: float = 0.0,
         match_metric: str = "dot",
+        raw_direction_output: bool = False,
     ) -> None:
         super().__init__()
         if not kernel_sizes:
             raise ValueError("kernel_sizes must not be empty")
-        if embed_dim != 2 * bases:
+        self.raw_direction_output = bool(raw_direction_output)
+        if raw_direction_output and (pose_softmax or use_null):
+            raise ValueError('Raw direction output does not use pose softmax/null')
+        if embed_dim != (bases if raw_direction_output else 2 * bases):
             raise ValueError("embed_dim must equal 2 * bases for cosine/sine output")
         if not 1 <= directions <= global_directions:
             raise ValueError("directions must be in [1, global_directions]")
@@ -189,6 +193,8 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
             else:
                 pose_score = pose_score.softmax(-1)
 
+        if self.raw_direction_output:
+            return pose_score.transpose(-1, -2)
         # B,N,P,D times D,2 -> B,N,P,2.  The final dimension is interleaved
         # as prototype0(cos,sin), prototype1(cos,sin), ...
         response = torch.einsum(
