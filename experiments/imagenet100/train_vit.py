@@ -71,6 +71,8 @@ class TrainConfig:
     rot_global_directions: int = 8
     rot_direction_angles_degrees: tuple[float, ...] | None = None
     rot_angular_bins_per_radius: int = 4
+    rot_harmonic_orders: tuple[int, ...] = (1,)
+    rot_output_groups: int = 1
     look_compact_variable_rings: bool = False
     look_angular_bins_per_radius: int | None = None
     image_look_field_direction_bins: int | None = None
@@ -728,6 +730,8 @@ def main() -> None:
         rot_global_directions=config.rot_global_directions,
         rot_direction_angles_degrees=config.rot_direction_angles_degrees,
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
+        rot_harmonic_orders=tuple(config.rot_harmonic_orders),
+        rot_output_groups=config.rot_output_groups,
         look_compact_variable_rings=config.look_compact_variable_rings,
         look_angular_bins_per_radius=config.look_angular_bins_per_radius,
         image_look_field_direction_bins=config.image_look_field_direction_bins,

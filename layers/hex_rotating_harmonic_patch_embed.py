@@ -35,15 +35,25 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         null_initial_score: float = 0.0,
         match_metric: str = "dot",
         raw_direction_output: bool = False,
+        harmonic_orders: tuple[int, ...] = (1,),
+        output_groups: int = 1,
     ) -> None:
         super().__init__()
         if not kernel_sizes:
             raise ValueError("kernel_sizes must not be empty")
         self.raw_direction_output = bool(raw_direction_output)
+        if not harmonic_orders or any(int(o) != o or o <= 0 for o in harmonic_orders):
+            raise ValueError('harmonic_orders must be positive integers')
+        if output_groups < 1 or bases % output_groups:
+            raise ValueError('bases must divide into output_groups')
+        if raw_direction_output and (output_groups != 1 or tuple(harmonic_orders) != (1,)):
+            raise ValueError('Raw output cannot group circular moments')
+        self.output_groups = output_groups
+        self.harmonic_orders = tuple(harmonic_orders)
         if raw_direction_output and (pose_softmax or use_null):
             raise ValueError('Raw direction output does not use pose softmax/null')
-        if embed_dim != (bases if raw_direction_output else 2 * bases):
-            raise ValueError("embed_dim must equal 2 * bases for cosine/sine output")
+        if embed_dim != (bases if raw_direction_output else 2 * len(harmonic_orders) * bases // output_groups):
+            raise ValueError('embed_dim must match grouped moment dimensions')
         if not 1 <= directions <= global_directions:
             raise ValueError("directions must be in [1, global_directions]")
         if prototype_chunk_size <= 0 or prototype_std <= 0:
@@ -123,7 +133,8 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
 
         self.register_buffer(
             "direction_coefficients",
-            torch.stack((theta.cos(), theta.sin()), dim=-1),
+            torch.stack([f(theta * order) for order in harmonic_orders
+                         for f in (torch.cos, torch.sin)], dim=-1),
             persistent=False,
         )
 
@@ -223,4 +234,9 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
                 )
                 for start in range(0, self.bases, self.prototype_chunk_size)
             ]
-            return torch.cat(chunks, dim=-1) + self.output_bias
+            output = torch.cat(chunks, dim=-1)
+            if self.output_groups > 1:
+                # Contiguous groups of prototypes. SUM, not mean or a learned map.
+                output = output.reshape(*output.shape[:-1], self.output_groups,
+                                        self.embed_dim).sum(-2)
+            return output + self.output_bias

@@ -50,6 +50,8 @@ def build_imagenet100_model(
     rot_global_directions: int = 8,
     rot_direction_angles_degrees: tuple[float, ...] | None = None,
     rot_angular_bins_per_radius: int = 4,
+    rot_harmonic_orders: tuple[int, ...] = (1,),
+    rot_output_groups: int = 1,
     look_compact_variable_rings: bool = False,
     look_angular_bins_per_radius: int | None = None,
     image_look_field_direction_bins: int | None = None,
@@ -82,6 +84,8 @@ def build_imagenet100_model(
 
     if variant not in MODEL_VARIANTS:
         raise ValueError(f"model_variant must be one of {sorted(MODEL_VARIANTS)}")
+    if (tuple(rot_harmonic_orders) != (1,) or rot_output_groups != 1) and variant != 'rot_hex_harmonic_softmax_pe':
+        raise ValueError('Grouped higher moments currently require harmonic softmax PE-only')
     if rot_direction_angles_degrees is not None and (
         variant not in {"rot_hex_harmonic_pe", "rot_hex_harmonic_softmax_pe",
                         "rot_hex_harmonic_l1_softmax_pe"}
@@ -271,6 +275,8 @@ def build_imagenet100_model(
             "rot_hex_harmonic_l1_softmax_pe",
         }
         patch_embed = HexRotatingHarmonicPatchEmbed(
+            harmonic_orders=tuple(rot_harmonic_orders),
+            output_groups=rot_output_groups,
             direction_angles_degrees=rot_direction_angles_degrees,
             img_size=image_size,
             in_chans=3,
