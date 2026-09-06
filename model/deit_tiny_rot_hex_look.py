@@ -39,6 +39,7 @@ class DeiTTinyRotHexLook(nn.Module):
         global_directions: int = 8,
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
+        look_angular_bins_per_radius: int | None = None,
         image_look: bool = True,
         center_pose_look: bool = False,
         center_pose_grid_look: bool = False,
@@ -58,6 +59,10 @@ class DeiTTinyRotHexLook(nn.Module):
         stripe_offset_subdivisions: int = 4,
     ) -> None:
         super().__init__()
+        if look_angular_bins_per_radius is not None and (
+            not image_look or image_look_probes != 1 or sparse_hex_look
+        ):
+            raise ValueError('Variable Look fields currently require dense single-probe Image Look')
         self.embed_dim = 192
         self.depth = 12
         self.num_heads = 3
@@ -174,6 +179,7 @@ class DeiTTinyRotHexLook(nn.Module):
             prototype_radius=12.0,
             look_direction_bins=self.look_direction_bins,
             look_radial_bins=self.look_radial_bins,
+            look_angular_bins_per_radius=look_angular_bins_per_radius,
             look_radius=4.0,
             patch_centers_xy=self.patch_embed.patch_centers_xy,
             patch_coordinates_xy=patch_coordinates,
@@ -447,6 +453,12 @@ class DeiTTinyRotHexLook(nn.Module):
                     'image_template':self.look_bank.look_grid.detach().float().cpu().tolist(),
                     'feature_template':self.center_look.look_grid.detach().float().cpu().tolist()}
         if self.center_look is None:
+            if self.look_bank is not None and self.look_bank.look_angular_bins_per_radius is not None:
+                return {'image_look_field_ring_counts':self.look_bank.field_ring_counts.cpu().tolist(),
+                        'image_look_field_weights_per_head':int(self.look_bank.look_grid.shape[-1]),
+                        'image_look_field_backend':'fixed_sparse_interpolation',
+                        'image_look_source_directions':self.look_bank.source_directions,
+                        'image_look_source_period':self.look_bank.source_direction_period}
             return {}
         name = (
             "center_pose_grid_look"

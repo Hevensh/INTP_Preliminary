@@ -49,6 +49,7 @@ def build_imagenet100_model(
     rot_direction_angles_degrees: tuple[float, ...] | None = None,
     rot_angular_bins_per_radius: int = 4,
     look_compact_variable_rings: bool = False,
+    look_angular_bins_per_radius: int | None = None,
     center_look_layers_per_probe: int = 1,
     image_look_probes: int = 1,
     feature_look_probes: int = 1,
@@ -130,6 +131,7 @@ def build_imagenet100_model(
             global_directions=rot_global_directions,
             angular_bins_per_radius=rot_angular_bins_per_radius,
             look_compact_variable_rings=look_compact_variable_rings,
+            look_angular_bins_per_radius=look_angular_bins_per_radius,
             image_look=variant not in {
                 "rot_hex_harmonic_center_look",
                 "rot_hex_harmonic_pe_center_look",

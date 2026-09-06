@@ -10,6 +10,7 @@ from .hex_patch_geometry import HexPatchGeometry
 from .hex_rotating_polar_patch_embed import _PolarRenderer
 from .polar_ring_sampler import PolarRingSampler
 from .rotating_dot_product import rotating_dot_score, weighted_patch_flat
+from .triton_polar_renderer import triton_polar_render
 from .square_patch_low_rank_look import build_square_patch_centers
 
 
@@ -38,6 +39,7 @@ class SquarePatchDenseGridLook(nn.Module):
         prototype_radius: float = 12.0,
         look_direction_bins: int | None = None,
         look_radial_bins: int | None = None,
+        look_angular_bins_per_radius: int | None = None,
         look_radius: float = 4.0,
         patch_centers_xy: torch.Tensor | None = None,
         patch_coordinates_xy: torch.Tensor | None = None,
@@ -47,6 +49,9 @@ class SquarePatchDenseGridLook(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
+        if look_angular_bins_per_radius is not None and look_angular_bins_per_radius <= 0:
+            raise ValueError('look_angular_bins_per_radius must be positive')
+        self.look_angular_bins_per_radius = look_angular_bins_per_radius
         # Unless explicitly overridden for an ablation, couple the Look field
         # to the geometry it routes: one angular bin per full-period probe and
         # two radial bins per tokenizer scale.
@@ -175,11 +180,45 @@ class SquarePatchDenseGridLook(nn.Module):
         # Zero makes insertion exactly equivalent to the original attention.
         # The table itself receives gradients immediately; prototype gradients
         # begin once the table moves away from zero.
-        self.look_grid = nn.Parameter(torch.zeros(
-            self.num_heads, self.look_radial_bins, self.look_direction_bins
-        ))
+        field_shape = ((self.look_radial_bins, self.look_direction_bins)
+                       if look_angular_bins_per_radius is None else
+                       (look_angular_bins_per_radius * self.look_radial_bins *
+                        (self.look_radial_bins + 1) // 2,))
+        self.look_grid = nn.Parameter(torch.zeros(self.num_heads, *field_shape))
 
         self._register_look_sampling_buffers(tuple(float(v) for v in scales))
+        if look_angular_bins_per_radius is not None:
+            self._register_variable_field()
+
+    def _register_variable_field(self):
+        """Precompute four interpolation taps with independent angular grids per ring.
+
+        Sparse matrix products avoid four large gather/autograd intermediates.
+        Maps are geometry-only and shared by every head, layer and batch.
+        """
+        counts = torch.arange(1, self.look_radial_bins + 1) * self.look_angular_bins_per_radius
+        offsets = torch.cat((torch.zeros(1,dtype=torch.long),counts.cumsum(0)))
+        self.register_buffer('field_ring_counts',counts,persistent=False)
+        # Recover the normalized, pose-relative angle from the canonical grid.
+        turn = (self.look_angular0 + self.look_angular_fraction) / self.look_direction_bins
+        indices,weights = [],[]
+        for ring,radial_weight in ((self.look_radial0,1-self.look_radial_fraction),
+                                    (self.look_radial1,self.look_radial_fraction)):
+            position = turn * counts[ring]
+            left = position.floor().long()
+            fraction = position - position.floor()
+            for angular,weight in ((left,1-fraction),(left+1,fraction)):
+                indices.append((offsets[ring]+angular%counts[ring]).flatten())
+                weights.append((radial_weight*weight*self.look_valid).flatten())
+        size = self.look_valid.numel()
+        rows = torch.arange(size).repeat(4)
+        cols = torch.cat(indices)
+        values = torch.cat(weights)
+        keep = values != 0
+        matrix = torch.sparse_coo_tensor(torch.stack((rows[keep],cols[keep])),
+            values[keep],(size,int(offsets[-1]))).coalesce()
+        self.register_buffer('field_interpolation',matrix.to_sparse_csr(),persistent=False)
+        self.register_buffer('field_interpolation_t',matrix.transpose(0,1).coalesce().to_sparse_csr(),persistent=False)
 
     @property
     def num_patches(self) -> int:
@@ -280,7 +319,7 @@ class SquarePatchDenseGridLook(nn.Module):
             if not isinstance(rings, list) or len(rings) != self.num_scales:
                 raise ValueError("compact rings must be one flattened patch tensor per scale")
             scores = [
-                rotating_dot_score(patch, renderer(self.match_prototype))
+                rotating_dot_score(patch, triton_polar_render(self.match_prototype, renderer))
                 for patch, renderer in zip(rings, self.compact_renderers)
             ]
             return torch.stack(scores, dim=3)
@@ -314,6 +353,11 @@ class SquarePatchDenseGridLook(nn.Module):
 
     def transformed_look_grids(self) -> torch.Tensor:
         """Render the shared grid at every scale and direction: ``(H,S,T,N,N)``."""
+        if self.look_angular_bins_per_radius is not None:
+            flat = _VariableField.apply(self.look_grid, self.field_interpolation,
+                                        self.field_interpolation_t)
+            return flat.reshape(self.num_heads,self.num_scales,self.source_directions,
+                                self.num_patches,self.num_patches)
         grid = self.look_grid
 
         def gather(radial: torch.Tensor, angular: torch.Tensor) -> torch.Tensor:
@@ -375,3 +419,15 @@ class SquarePatchDenseGridLook(nn.Module):
             image, track_input_grad=track_input_grad
         )
         return self.forward_rings(rings, coverage, include_cls=include_cls)
+
+
+class _VariableField(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, grid, matrix, transpose):
+        ctx.save_for_backward(transpose)
+        return torch.sparse.mm(matrix,grid.t().contiguous()).t().contiguous()
+
+    @staticmethod
+    def backward(ctx, grad):
+        (transpose,) = ctx.saved_tensors
+        return torch.sparse.mm(transpose,grad.t().contiguous()).t().contiguous(),None,None

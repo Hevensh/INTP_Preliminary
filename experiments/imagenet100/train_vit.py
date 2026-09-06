@@ -71,6 +71,7 @@ class TrainConfig:
     rot_direction_angles_degrees: tuple[float, ...] | None = None
     rot_angular_bins_per_radius: int = 4
     look_compact_variable_rings: bool = False
+    look_angular_bins_per_radius: int | None = None
     center_look_layers_per_probe: int = 1
     image_look_probes: int = 1
     feature_look_probes: int = 1
@@ -722,6 +723,7 @@ def main() -> None:
         rot_direction_angles_degrees=config.rot_direction_angles_degrees,
         rot_angular_bins_per_radius=config.rot_angular_bins_per_radius,
         look_compact_variable_rings=config.look_compact_variable_rings,
+        look_angular_bins_per_radius=config.look_angular_bins_per_radius,
         center_look_layers_per_probe=config.center_look_layers_per_probe,
         image_look_probes=config.image_look_probes,
         feature_look_probes=config.feature_look_probes,
