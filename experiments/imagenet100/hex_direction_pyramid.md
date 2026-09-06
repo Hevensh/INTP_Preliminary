@@ -1,9 +1,13 @@
-# Six-direction Hex pyramid: 96 / 192 / 256
+# Six-direction Hex pyramid: 96 / 192 / 288
 
 Independent variant `hex_direction_pyramid`; old experiments remain available.
 Each stage has two two-ring local attention blocks, including the central token.
-Stage widths are96/192/256, heads3/3/4, token counts195/52/14 for224px input.
-The head change is required because256 is not divisible by3.
+Stage widths are96/192/288, heads3/3/3, token counts195/52/14 for224px input.
+All stages use three heads, with per-head dimensions32/64/96.
+FFN ratio8.25 gives hidden widths792/1584/2376. Total parameters5,494,660,
+versus5,508,616 for the local GE baseline (0.25% fewer). This matches parameter
+count, NOT FLOPs, capacity allocation or the exact GE architecture. Optimizer,
+learning rate5e-4,20-epoch schedule and batch256/GPU remain unchanged.
 
 After each of the first two stages, select even/even axial coordinates relative
 to the first token and apply a direction-shared linear projection. Coordinates
@@ -23,7 +27,8 @@ chunks. There are six attention calls per forward, versus156 previously.
 Checkpoint only attention in stages1/2, not the whole FFN/block; stage3 needs no
 checkpoint. SDPA is used but no specific Flash backend is guaranteed on T4.
 
-Local RTX4060 synthetic224px training steps (AMP, AdamW; no data loading or DDP):
+Historical 96/192/256 version ONLY: local RTX4060 synthetic224px training
+steps (AMP, AdamW; no data loading or DDP). Not current288-width measurements:
 
 | Batch | Old12-layer model | Pyramid | Old/pyramid peak allocated |
 |---|---:|---:|---:|
@@ -33,7 +38,7 @@ Local RTX4060 synthetic224px training steps (AMP, AdamW; no data loading or DDP)
 Measurements follow warmup in the same process. Faster at the cost of more
 temporary memory. Batch256/GPU remains the training default, but has NOT been
 validated on T4; batch64 memory is not a guaranteed linear extrapolation.
-Parameter count:2,866,116. Eight CPU/CUDA tests pass, including checkpoint and
+Historical256-width parameter count:2,866,116. Eight CPU/CUDA tests pass, including checkpoint and
 query chunk gradient equivalence; full224px AMP backward/optimizer steps pass.
 
 ## Run
@@ -43,4 +48,6 @@ query chunk gradient equivalence; full224px AMP backward/optimizer steps pass.
 20epochs with20-epoch LR schedule,2warmup epochs, seed0, batch256/GPU,2GPUs.
 No full training launched locally. This model is still smaller than the5.509M
 GE baseline and differs in tokenizer, angle domain, normalization and readout;
-the experiment does not isolate Hex geometry alone.
+the experiment does not isolate Hex geometry alone. The earlier smaller-budget
+statement applies to the historical256-width version; the current288/FFN8.25
+version approximately matches GE's parameter count.

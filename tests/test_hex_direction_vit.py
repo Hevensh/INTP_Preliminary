@@ -39,13 +39,14 @@ def test_raw_features_and_model():
 def test_pyramid_geometry():
     m = HexDirectionPyramid()
     assert m.token_counts == [195,52,14]
-    assert [s[0].attn.heads for s in m.stages] == [3,3,4]
+    assert [s[0].attn.heads for s in m.stages] == [3,3,3]
     for stage in m.stages:
         a=stage[0].attn
         assert a.indices.shape[1] == 19
         assert a.valid.any(-1).all()
         assert a.indices.max() < len(a.indices)
-    assert sum(p.numel() for p in m.parameters()) == 2866116
+    assert m.embed_dim == 288
+    assert sum(p.numel() for p in m.parameters()) == 5494660
 
 
 def test_attention_checkpoint_equivalence():

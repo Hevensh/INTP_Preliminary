@@ -82,13 +82,14 @@ class HexDirectionAttention(nn.Module):
 
 class DirectionBlock(nn.Module):
     def __init__(self, coordinates, angles, dim=96, heads=3, query_chunk=16,
-                 checkpoint_attention=False):
+                 checkpoint_attention=False, mlp_ratio=4.0):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim, eps=1e-6)
         self.attn = HexDirectionAttention(dim, heads, coordinates, angles, query_chunk)
         self.checkpoint_attention = checkpoint_attention
         self.norm2 = nn.LayerNorm(dim, eps=1e-6)
-        self.mlp = nn.Sequential(nn.Linear(dim, dim*4), nn.GELU(), nn.Linear(dim*4, dim))
+        hidden = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(nn.Linear(dim, hidden), nn.GELU(), nn.Linear(hidden, dim))
 
     def forward(self, x):
         z = self.norm1(x)
@@ -155,14 +156,14 @@ New coordinates are divided by two so a two-ring window grows in image units.
 
 
 class HexDirectionPyramid(nn.Module):
-    """96/192/256, 2/2/2 blocks. Shared weights across six half-circle slots.
+    """96/192/288, 2/2/2 blocks. Shared weights across six half-circle slots.
 
 Whole-stage query batches remove the small-query loop. Only attention is
 checkpointed, not the FFN, and only in the first two (larger) stages.
 """
     def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True):
         super().__init__()
-        self.embed_dim = 256
+        self.embed_dim = 288
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
             img_size=image_size, in_chans=3, embed_dim=96, bases=96,
             directions=6, global_directions=12, angular_bins_per_radius=3,
@@ -173,19 +174,20 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         self.stages = nn.ModuleList()
         self.transitions = nn.ModuleList()
         self.token_counts = []
-        for i, (dim, heads) in enumerate(zip((96,192,256),(3,3,4))):
+        for i, (dim, heads) in enumerate(zip((96,192,288),(3,3,3))):
             self.token_counts.append(len(coordinates))
             self.stages.append(nn.Sequential(*[
                 DirectionBlock(coordinates, angles, dim, heads,
                                query_chunk=len(coordinates),
-                               checkpoint_attention=checkpoint_attention and i<2)
+                               checkpoint_attention=checkpoint_attention and i<2,
+                               mlp_ratio=8.25)
                 for _ in range(2)]))
             if i<2:
-                transition = HexSubsample(coordinates, dim, (192,256)[i])
+                transition = HexSubsample(coordinates, dim, (192,288)[i])
                 self.transitions.append(transition)
                 coordinates = transition.coordinates
-        self.norm = nn.LayerNorm(256, eps=1e-6)
-        self.head = nn.Linear(256, num_classes)
+        self.norm = nn.LayerNorm(288, eps=1e-6)
+        self.head = nn.Linear(288, num_classes)
 
     def forward(self, image):
         x = self.patch_embed(image)
@@ -196,8 +198,9 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         return self.head(self.norm(x).mean(dim=(1,2)))
 
     def experiment_diagnostics(self):
-        return dict(stage_widths=[96,192,256], stage_depths=[2,2,2],
-                    stage_heads=[3,3,4], stage_tokens=self.token_counts,
+        return dict(stage_widths=[96,192,288], stage_depths=[2,2,2],
+                    stage_heads=[3,3,3], stage_tokens=self.token_counts,
+                    mlp_ratio=8.25, mlp_hidden=[792,1584,2376],
                     directions_degrees=[0,30,60,90,120,150],
                     neighborhood=19, strict_equivariance=False,
                     downsample='even/even axial selection after two blocks, shared linear',
