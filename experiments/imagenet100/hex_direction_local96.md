@@ -31,8 +31,14 @@ This prototype makes no exact C6-equivariance claim.
 `!bash scripts/kaggle/run_imagenet100_hex_direction_local96_2xt4_e5.sh`
 
 Two GPUs, batch256/GPU, same data/augmentation defaults and seed0; five epochs
-with two warmup epochs and a five-epoch cosine schedule. This is not the first
-five epochs of a20-epoch schedule. No full training has been performed locally.
+with two warmup epochs and a twenty-epoch cosine schedule. The five-epoch run
+stops early without compressing the learning-rate schedule. Future smoke configs
+must set `schedule_epochs` to the intended full training horizon; `epochs` only
+controls stopping. Keep batches, sample count and optimizer steps per epoch
+matched when comparing early curves. Historical configs are not rewritten.
+No full training has been performed locally.
+
+Full run: `!bash scripts/kaggle/run_imagenet100_hex_direction_local96_2xt4_e20.sh`.
 
 1,433,668 parameters. CPU geometry/chunk/gradient/model tests pass. Local RTX4060
 224px AMP forward/backward passes. A synthetic batch16 with AdamW measured

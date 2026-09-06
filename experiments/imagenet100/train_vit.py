@@ -44,6 +44,7 @@ class TrainConfig:
     image_size: int = 224
     pretrained: bool = False
     epochs: int = 5
+    schedule_epochs: int | None = None
     batch_size: int = 128
     gradient_accumulation_steps: int = 1
     num_workers: int = 4
@@ -138,6 +139,8 @@ def _load_config(path: Path) -> TrainConfig:
 
 
 def _validate_config(config: TrainConfig) -> None:
+    if config.schedule_epochs is not None and config.schedule_epochs < config.epochs:
+        raise ValueError('schedule_epochs must be at least epochs')
     if min(config.epochs, config.batch_size, config.num_classes, config.image_size) <= 0:
         raise ValueError("epochs, batch_size, num_classes, and image_size must be positive")
     if config.num_workers < 0:
@@ -618,6 +621,7 @@ def main() -> None:
     parser.add_argument("--data-root")
     parser.add_argument("--output-root")
     parser.add_argument("--epochs", type=int)
+    parser.add_argument("--schedule-epochs", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--center-look-layers-per-probe", type=int)
     parser.add_argument("--image-look-probes", type=int)
@@ -629,7 +633,7 @@ def main() -> None:
     args = parser.parse_args()
     config = _load_config(args.config)
     for name in (
-        "experiment_name", "data_root", "output_root", "epochs", "batch_size",
+        "experiment_name", "data_root", "output_root", "epochs", "schedule_epochs", "batch_size",
         "center_look_layers_per_probe", "resume", "image_look_probes",
         "feature_look_probes", "feature_look_rotating_probes", "sparse_hex_look",
         "rot_progressive_differentiation"
@@ -768,7 +772,7 @@ def main() -> None:
     optimizer_steps_per_epoch = math.ceil(
         steps_per_epoch / config.gradient_accumulation_steps
     )
-    total_steps = optimizer_steps_per_epoch * config.epochs
+    total_steps = optimizer_steps_per_epoch * (config.schedule_epochs or config.epochs)
     warmup_steps = round(optimizer_steps_per_epoch * config.warmup_epochs)
     min_ratio = config.min_learning_rate / config.learning_rate
     def scheduler_factory(
