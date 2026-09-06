@@ -137,14 +137,19 @@ class _TritonPolarRender(torch.autograd.Function):
             dtype=grad_output.dtype,
         )
         elements = grad_prototype.numel()
-        block = 256
         contributions = reverse_lookup.shape[1]
+        # The reduction expands to [block, next_power_of_2(contributions)].
+        # A 256-row tile can request 128 KiB on sm75 (T4 allows 64 KiB).
+        # Bound the tile rather than changing batch size or numerical precision.
+        block_contributions = triton.next_power_of_2(contributions)
+        block = min(32, max(1, 2048 // block_contributions))
         _polar_backward_gather[(triton.cdiv(elements, block),)](
             grad_output.contiguous(), reverse_lookup, reverse_weight,
             grad_prototype, elements=elements, channels=channels,
             directions=directions, samples=samples, stored=stored,
             contributions=contributions,
-            block_contributions=triton.next_power_of_2(contributions), block=block,
+            block_contributions=block_contributions, block=block,
+            num_warps=4, num_stages=1,
         )
         return (
             grad_prototype, None, None, None, None, None, None, None,
