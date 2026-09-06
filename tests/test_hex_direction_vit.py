@@ -1,6 +1,7 @@
 import math
 import torch
-from model.hex_direction_vit import HexDirectionViT, HexDirectionAttention, hex_neighbors
+from model.hex_direction_vit import (HexDirectionViT, HexDirectionAttention,
+                                    HexDirectionPyramid, DirectionBlock, hex_neighbors)
 
 
 def test_hex_neighbors():
@@ -33,3 +34,30 @@ def test_raw_features_and_model():
     assert y.shape == (1,100)
     y.square().mean().backward()
     assert all(p.grad is not None and p.grad.isfinite().all() for p in m.parameters())
+
+
+def test_pyramid_geometry():
+    m = HexDirectionPyramid()
+    assert m.token_counts == [195,52,14]
+    assert [s[0].attn.heads for s in m.stages] == [3,3,4]
+    for stage in m.stages:
+        a=stage[0].attn
+        assert a.indices.shape[1] == 19
+        assert a.valid.any(-1).all()
+        assert a.indices.max() < len(a.indices)
+    assert sum(p.numel() for p in m.parameters()) == 2866116
+
+
+def test_attention_checkpoint_equivalence():
+    xy=torch.tensor([(0.,0.),(1.,0.),(.5,math.sqrt(3)/2)])
+    args=(xy,torch.arange(6)*math.pi/6)
+    a=DirectionBlock(*args,dim=12,heads=3,query_chunk=3,checkpoint_attention=True)
+    b=DirectionBlock(*args,dim=12,heads=3,query_chunk=1)
+    b.load_state_dict(a.state_dict())
+    x=torch.randn(2,3,6,12,requires_grad=True)
+    y,z=a(x),b(x)
+    torch.testing.assert_close(y,z)
+    y.square().mean().backward()
+    z.square().mean().backward()
+    for p,q in zip(a.parameters(),b.parameters()):
+        torch.testing.assert_close(p.grad,q.grad,atol=1e-6,rtol=1e-4)

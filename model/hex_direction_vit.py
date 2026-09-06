@@ -81,15 +81,20 @@ class HexDirectionAttention(nn.Module):
 
 
 class DirectionBlock(nn.Module):
-    def __init__(self, coordinates, angles, dim=96, heads=3):
+    def __init__(self, coordinates, angles, dim=96, heads=3, query_chunk=16,
+                 checkpoint_attention=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim, eps=1e-6)
-        self.attn = HexDirectionAttention(dim, heads, coordinates, angles)
+        self.attn = HexDirectionAttention(dim, heads, coordinates, angles, query_chunk)
+        self.checkpoint_attention = checkpoint_attention
         self.norm2 = nn.LayerNorm(dim, eps=1e-6)
         self.mlp = nn.Sequential(nn.Linear(dim, dim*4), nn.GELU(), nn.Linear(dim*4, dim))
 
     def forward(self, x):
-        x = x + self.attn(self.norm1(x))
+        z = self.norm1(x)
+        z = (checkpoint(self.attn, z, use_reentrant=False)
+             if self.training and self.checkpoint_attention else self.attn(z))
+        x = x + z
         return x + self.mlp(self.norm2(x))
 
 
@@ -124,3 +129,78 @@ class HexDirectionViT(nn.Module):
                     candidates_per_query=114, strict_equivariance=False,
                     tokenizer='raw dot, two scales summed, no null/softmax/circular projection',
                     readout='space and direction mean', checkpoint_blocks=self.checkpoint_blocks)
+
+
+class HexSubsample(nn.Module):
+    """Keep the even/even axial sublattice after two neighborhood blocks.
+
+No additional spatial pooling: preceding attention already aggregates neighbors.
+New coordinates are divided by two so a two-ring window grows in image units.
+"""
+    def __init__(self, coordinates, in_dim, out_dim):
+        super().__init__()
+        xy = coordinates.detach().cpu().double()
+        r = xy[:, 1]*2/math.sqrt(3)
+        qr = torch.stack((xy[:, 0]-r/2, r), -1)
+        qr = qr-qr[0]
+        if not torch.allclose(qr, qr.round(), atol=1e-4, rtol=0):
+            raise ValueError('Expected Hex lattice')
+        keep = (qr.round().long().remainder(2)==0).all(-1).nonzero().flatten()
+        self.register_buffer('keep', keep, persistent=False)
+        self.register_buffer('coordinates', coordinates[keep]/2, persistent=False)
+        self.proj = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        return self.proj(x[:, self.keep])
+
+
+class HexDirectionPyramid(nn.Module):
+    """96/192/256, 2/2/2 blocks. Shared weights across six half-circle slots.
+
+Whole-stage query batches remove the small-query loop. Only attention is
+checkpointed, not the FFN, and only in the first two (larger) stages.
+"""
+    def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True):
+        super().__init__()
+        self.embed_dim = 256
+        self.patch_embed = HexRotatingHarmonicPatchEmbed(
+            img_size=image_size, in_chans=3, embed_dim=96, bases=96,
+            directions=6, global_directions=12, angular_bins_per_radius=3,
+            raw_direction_output=True, kernel_sizes=(24,12))
+        coo = self.patch_embed.coo_patchs
+        coordinates = torch.stack((coo.real, coo.imag), -1)
+        angles = torch.arange(6)*math.pi/6
+        self.stages = nn.ModuleList()
+        self.transitions = nn.ModuleList()
+        self.token_counts = []
+        for i, (dim, heads) in enumerate(zip((96,192,256),(3,3,4))):
+            self.token_counts.append(len(coordinates))
+            self.stages.append(nn.Sequential(*[
+                DirectionBlock(coordinates, angles, dim, heads,
+                               query_chunk=len(coordinates),
+                               checkpoint_attention=checkpoint_attention and i<2)
+                for _ in range(2)]))
+            if i<2:
+                transition = HexSubsample(coordinates, dim, (192,256)[i])
+                self.transitions.append(transition)
+                coordinates = transition.coordinates
+        self.norm = nn.LayerNorm(256, eps=1e-6)
+        self.head = nn.Linear(256, num_classes)
+
+    def forward(self, image):
+        x = self.patch_embed(image)
+        for i, stage in enumerate(self.stages):
+            x = stage(x)
+            if i<2:
+                x = self.transitions[i](x)
+        return self.head(self.norm(x).mean(dim=(1,2)))
+
+    def experiment_diagnostics(self):
+        return dict(stage_widths=[96,192,256], stage_depths=[2,2,2],
+                    stage_heads=[3,3,4], stage_tokens=self.token_counts,
+                    directions_degrees=[0,30,60,90,120,150],
+                    neighborhood=19, strict_equivariance=False,
+                    downsample='even/even axial selection after two blocks, shared linear',
+                    readout='space and direction mean',
+                    checkpoint='attention only, stages 1 and 2',
+                    query_chunk='entire stage')
