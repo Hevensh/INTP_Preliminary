@@ -40,6 +40,7 @@ class DeiTTinyRotHexLook(nn.Module):
         angular_bins_per_radius: int = 4,
         look_compact_variable_rings: bool = False,
         look_angular_bins_per_radius: int | None = None,
+        image_look_field_direction_bins: int | None = None,
         image_look: bool = True,
         center_pose_look: bool = False,
         center_pose_grid_look: bool = False,
@@ -59,6 +60,13 @@ class DeiTTinyRotHexLook(nn.Module):
         stripe_offset_subdivisions: int = 4,
     ) -> None:
         super().__init__()
+        if image_look_field_direction_bins is not None and (
+            image_look_field_direction_bins <= 0 or not image_look or
+            image_look_probes != 1 or sparse_hex_look or
+            feature_look_probes != 1 or feature_look_rotating_probes or
+            look_angular_bins_per_radius is not None
+        ):
+            raise ValueError('Fixed field override requires dense single-probe Image Look')
         if look_angular_bins_per_radius is not None and (
             not image_look or image_look_probes != 1 or sparse_hex_look
         ):
@@ -177,7 +185,8 @@ class DeiTTinyRotHexLook(nn.Module):
             source_direction_period=global_directions,
             scales=(1.0, 0.5),
             prototype_radius=12.0,
-            look_direction_bins=self.look_direction_bins,
+            look_direction_bins=(image_look_field_direction_bins or self.look_direction_bins),
+            sparse_field_interpolation=image_look_field_direction_bins is not None,
             look_radial_bins=self.look_radial_bins,
             look_angular_bins_per_radius=look_angular_bins_per_radius,
             look_radius=4.0,

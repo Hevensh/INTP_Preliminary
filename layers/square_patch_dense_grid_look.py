@@ -40,6 +40,7 @@ class SquarePatchDenseGridLook(nn.Module):
         look_direction_bins: int | None = None,
         look_radial_bins: int | None = None,
         look_angular_bins_per_radius: int | None = None,
+        sparse_field_interpolation: bool = False,
         look_radius: float = 4.0,
         patch_centers_xy: torch.Tensor | None = None,
         patch_coordinates_xy: torch.Tensor | None = None,
@@ -187,7 +188,7 @@ class SquarePatchDenseGridLook(nn.Module):
         self.look_grid = nn.Parameter(torch.zeros(self.num_heads, *field_shape))
 
         self._register_look_sampling_buffers(tuple(float(v) for v in scales))
-        if look_angular_bins_per_radius is not None:
+        if look_angular_bins_per_radius is not None or sparse_field_interpolation:
             self._register_variable_field()
 
     def _register_variable_field(self):
@@ -196,7 +197,9 @@ class SquarePatchDenseGridLook(nn.Module):
         Sparse matrix products avoid four large gather/autograd intermediates.
         Maps are geometry-only and shared by every head, layer and batch.
         """
-        counts = torch.arange(1, self.look_radial_bins + 1) * self.look_angular_bins_per_radius
+        counts = (torch.full((self.look_radial_bins,), self.look_direction_bins)
+                  if self.look_angular_bins_per_radius is None else
+                  torch.arange(1, self.look_radial_bins + 1) * self.look_angular_bins_per_radius)
         offsets = torch.cat((torch.zeros(1,dtype=torch.long),counts.cumsum(0)))
         self.register_buffer('field_ring_counts',counts,persistent=False)
         # Recover the normalized, pose-relative angle from the canonical grid.
@@ -353,8 +356,8 @@ class SquarePatchDenseGridLook(nn.Module):
 
     def transformed_look_grids(self) -> torch.Tensor:
         """Render the shared grid at every scale and direction: ``(H,S,T,N,N)``."""
-        if self.look_angular_bins_per_radius is not None:
-            flat = _VariableField.apply(self.look_grid, self.field_interpolation,
+        if hasattr(self, 'field_interpolation'):
+            flat = _VariableField.apply(self.look_grid.flatten(1), self.field_interpolation,
                                         self.field_interpolation_t)
             return flat.reshape(self.num_heads,self.num_scales,self.source_directions,
                                 self.num_patches,self.num_patches)

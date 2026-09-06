@@ -3,6 +3,26 @@ import torch
 from layers.square_patch_dense_grid_look import SquarePatchDenseGridLook
 
 
+@pytest.mark.parametrize('device', ['cpu', 'cuda'])
+def test_fixed_field_sparse_matches_reference(device):
+    if device == 'cuda' and not torch.cuda.is_available():
+        pytest.skip('CUDA')
+    kwargs = dict(image_size=48, num_heads=2, source_directions=7,
+                  source_direction_period=14, prototype_angular_bins=28,
+                  look_radial_bins=4, look_direction_bins=12)
+    regular = SquarePatchDenseGridLook(**kwargs).to(device)
+    sparse = SquarePatchDenseGridLook(**kwargs, sparse_field_interpolation=True).to(device)
+    torch.nn.init.normal_(regular.look_grid)
+    sparse.load_state_dict(regular.state_dict())
+    assert sparse.look_grid.shape == (2, 4, 12)
+    a, b = sparse.transformed_look_grids(), regular.transformed_look_grids()
+    torch.testing.assert_close(a, b, atol=3e-6, rtol=3e-5)
+    weight = torch.randn_like(a)
+    ga = torch.autograd.grad(a, sparse.look_grid, weight)[0]
+    gb = torch.autograd.grad(b, regular.look_grid, weight)[0]
+    torch.testing.assert_close(ga, gb, atol=2e-5, rtol=2e-4)
+
+
 def reference(look):
     xy=look.patch_coordinates_xy
     delta=xy.unsqueeze(0)-xy.unsqueeze(1)
