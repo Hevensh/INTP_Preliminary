@@ -73,6 +73,7 @@ class TrainConfig:
     look_compact_variable_rings: bool = False
     look_angular_bins_per_radius: int | None = None
     image_look_field_direction_bins: int | None = None
+    feature_look_field_direction_bins: int | None = None
     center_look_layers_per_probe: int = 1
     image_look_probes: int = 1
     feature_look_probes: int = 1
@@ -726,6 +727,7 @@ def main() -> None:
         look_compact_variable_rings=config.look_compact_variable_rings,
         look_angular_bins_per_radius=config.look_angular_bins_per_radius,
         image_look_field_direction_bins=config.image_look_field_direction_bins,
+        feature_look_field_direction_bins=config.feature_look_field_direction_bins,
         center_look_layers_per_probe=config.center_look_layers_per_probe,
         image_look_probes=config.image_look_probes,
         feature_look_probes=config.feature_look_probes,

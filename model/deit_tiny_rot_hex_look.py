@@ -41,6 +41,7 @@ class DeiTTinyRotHexLook(nn.Module):
         look_compact_variable_rings: bool = False,
         look_angular_bins_per_radius: int | None = None,
         image_look_field_direction_bins: int | None = None,
+        feature_look_field_direction_bins: int | None = None,
         image_look: bool = True,
         center_pose_look: bool = False,
         center_pose_grid_look: bool = False,
@@ -60,6 +61,12 @@ class DeiTTinyRotHexLook(nn.Module):
         stripe_offset_subdivisions: int = 4,
     ) -> None:
         super().__init__()
+        if feature_look_field_direction_bins is not None and (
+            feature_look_field_direction_bins <= 0 or not center_pose_grid_look or
+            feature_look_probes != 1 or feature_look_rotating_probes or
+            image_look_probes != 1 or sparse_hex_look
+        ):
+            raise ValueError('Feature field override requires dense single-probe grid Look')
         if image_look_field_direction_bins is not None and (
             image_look_field_direction_bins <= 0 or not image_look or
             image_look_probes != 1 or sparse_hex_look or
@@ -216,7 +223,7 @@ class DeiTTinyRotHexLook(nn.Module):
             if self.center_pose_grid_look:
                 center_kwargs = {
                     "radial_bins": self.look_radial_bins,
-                    "direction_bins": self.look_direction_bins,
+                    "direction_bins": feature_look_field_direction_bins or self.look_direction_bins,
                     "look_radius": 4.0,
                     "layers_per_probe": center_look_layers_per_probe,
                 }
