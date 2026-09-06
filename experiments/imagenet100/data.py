@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import os
 from dataclasses import dataclass
@@ -149,6 +150,14 @@ def load_or_index_imagefolder_samples(
     except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
         pass
 
+    bundled = Path(__file__).with_name("manifests") / "ambityga_imagenet100.json.gz"
+    if os.environ.get("INTP_DISABLE_BUNDLED_INDEX", "0") != "1":
+        try:
+            train, val = _load_portable_index(splits, bundled)
+            return train, val, True, bundled
+        except (OSError, EOFError, json.JSONDecodeError, AttributeError, TypeError, ValueError):
+            pass
+
     train, val = index_imagefolder_samples(splits)
     cache_root.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -166,6 +175,52 @@ def load_or_index_imagefolder_samples(
     finally:
         temporary.unlink(missing_ok=True)
     return train, val, False, cache_path
+
+
+def _load_portable_index(splits: ImageFolderSplits, path: Path):
+    """Reuse the pinned dataset's relative manifest; never traverse image folders.
+
+    This verifies layout/classes and boundary samples per class, not image
+    contents. Disable the bundled index when using a modified dataset.
+    """
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        payload = json.load(stream)
+    roots = (*splits.train, splits.val)
+    if (payload['version'] != 1 or payload['classes'] != list(splits.classes)
+            or payload['roots'] != [root.name for root in roots]):
+        raise ValueError('portable index layout mismatch')
+    result = []
+    for split_name, allowed in [('train', set(range(len(splits.train)))),
+                                ('val', {len(splits.train)})]:
+        samples = []
+        checks = {}
+        seen = set()
+        for root_id, relative, target in payload[split_name]:
+            if type(root_id) is not int or root_id not in allowed:
+                raise ValueError('invalid manifest root')
+            if type(target) is not int or not 0 <= target < len(splits.classes):
+                raise ValueError('invalid manifest label')
+            if not isinstance(relative, str) or '\\' in relative or ':' in relative:
+                raise ValueError('invalid manifest path')
+            parts = relative.split('/')
+            if len(parts) < 2 or any(p in {'', '.', '..'} for p in parts):
+                raise ValueError('unsafe manifest path')
+            if parts[0] != splits.classes[target]:
+                raise ValueError('manifest class mismatch')
+            key = (root_id, relative)
+            if key in seen:
+                raise ValueError('duplicate manifest path')
+            seen.add(key)
+            sample_path = roots[root_id].joinpath(*parts)
+            group = (root_id, target)
+            if group not in checks:
+                checks[group] = [sample_path, sample_path]
+            checks[group][1] = sample_path
+            samples.append((str(sample_path), target))
+        if not samples or not all(p.is_file() for pair in checks.values() for p in pair):
+            raise ValueError('manifest sample validation failed')
+        result.append(samples)
+    return tuple(result)
 
 
 def _directories_to_depth(root: Path, max_depth: int = 5) -> list[Path]:

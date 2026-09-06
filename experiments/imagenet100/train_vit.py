@@ -660,7 +660,7 @@ def main() -> None:
             config.data_root, expected_classes=config.num_classes
         )
         print(
-            f"[data] found {len(splits.classes)} classes; indexing image paths...",
+            f"[data] found {len(splits.classes)} classes; loading image index...",
             flush=True,
         )
         default_cache_dir = (
