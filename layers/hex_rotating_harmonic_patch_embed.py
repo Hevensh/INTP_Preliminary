@@ -8,6 +8,7 @@ import torch.nn as nn
 from layers.hex_patch_geometry import HexPatchGeometry
 from layers.hex_rotating_polar_patch_embed import _PolarRenderer
 from layers.rotating_dot_product import rotating_dot_score, weighted_patch_flat
+from layers.triton_polar_renderer import triton_polar_render
 
 
 class HexRotatingHarmonicPatchEmbed(nn.Module):
@@ -144,7 +145,7 @@ class HexRotatingHarmonicPatchEmbed(nn.Module):
         pose_score = None
         for scale_index, (patch, renderer) in enumerate(zip(patches, self.renderers)):
             cover = getattr(self, f"scale_cover_{scale_index}")
-            rendered = renderer(prototype)
+            rendered = triton_polar_render(prototype, renderer)
             if self.match_metric == "dot":
                 score = rotating_dot_score(patch, rendered)
             else:
