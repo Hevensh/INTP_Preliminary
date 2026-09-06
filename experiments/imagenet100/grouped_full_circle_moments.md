@@ -1,7 +1,9 @@
 # Full-circle first/second moments, four direct-sum groups
 
-PE-only DeiT-Tiny backbone,192 output channels. Keep K24/K12 and polar r5,
-but use192 prototypes and14 full-circle directions (2pi*d/14).
+Current recommended run uses the half6d3r sampling basis expanded to FULL12r3:
+PE-only DeiT-Tiny backbone,192 output channels, K24/K12, polar r3,
+192 prototypes and12 full-circle directions (2pi*d/12).
+The earlier full14r5 config is retained as superseded, not the recommended run.
 Two scale scores are summed BEFORE pose/null softmax, preserving the established
 tokenizer order. Null starts at0; real pose probabilities are not renormalized
 after dropping null. No Look or differentiation.
@@ -16,9 +18,9 @@ Tests compare grouped versus ungrouped outputs and prototype/null gradients,
 including prototype chunks crossing group boundaries. CUDA224px AMP full-model
 forward/backward passes. No full training performed.
 
-Approximate matching work is4x the96-prototype half7 setup; downstream ViT shape
+Approximate matching work is4x the96-prototype half6 setup; downstream ViT shape
 is unchanged. T4 full-batch memory/throughput is not validated by small local tests.
 
 Run20epochs,20-epoch LR horizon, LR5e-4,2warmup, batch256/GPU,2GPUs, seed0:
 
-`!bash scripts/kaggle/run_imagenet100_full14r5_moments12_b192_sum4_pe_2xt4_e20.sh`
+`!bash scripts/kaggle/run_imagenet100_full12r3_moments12_b192_sum4_pe_2xt4_e20.sh`
