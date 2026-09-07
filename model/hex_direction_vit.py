@@ -32,12 +32,23 @@ def hex_neighbors(coordinates):
     return indices.clamp_min(0), indices >= 0, delta
 
 
+class TokenGroupNorm(nn.GroupNorm):
+    """GE GroupNorm over channels, positions and orientations, for B,N,G,C."""
+    def __init__(self, dim):
+        super().__init__(1, dim, eps=1e-6)
+
+    def forward(self, x):
+        return super().forward(x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
+
+
 class HexDirectionAttention(nn.Module):
-    def __init__(self, dim, heads, coordinates, angles, query_chunk=16):
+    def __init__(self, dim, heads, coordinates, angles, query_chunk=16, ge_aligned=False):
         super().__init__()
         if dim % heads:
             raise ValueError('dim must divide into heads')
         self.heads, self.dh = heads, dim // heads
+        self.ge_aligned = ge_aligned
+        self.scale = (dim if ge_aligned else self.dh) ** -0.5
         self.groups, self.query_chunk = len(angles), query_chunk
         indices, valid, delta = hex_neighbors(coordinates)
         self.register_buffer('indices', indices, persistent=False)
@@ -54,14 +65,33 @@ class HexDirectionAttention(nn.Module):
         self.register_buffer('relative_direction', relative, persistent=False)
         self.qkv = nn.Linear(dim, 3*dim)
         self.proj = nn.Linear(dim, dim)
-        self.position = nn.Sequential(nn.Linear(2, 16), nn.SiLU(), nn.Linear(16, self.dh))
-        self.direction = nn.Sequential(nn.Linear(2, 16), nn.SiLU(), nn.Linear(16, self.dh))
+        if ge_aligned:
+            expected = torch.arange(len(a)) * (2 * math.pi / len(a))
+            if not torch.allclose(a, expected, atol=1e-5):
+                raise ValueError('GE-aligned relative group embedding requires full-circle directions')
+            d = self.dh // 3
+            self.row_embedding = nn.Sequential(nn.Linear(1, 16), nn.SiLU(), nn.Linear(16, d))
+            self.col_embedding = nn.Sequential(nn.Linear(1, 16), nn.SiLU(), nn.Linear(16, d))
+            self.group_embedding = nn.Embedding(len(a), self.dh - 2*d)
+            ids = torch.arange(len(a))
+            self.register_buffer('relative_group', (ids[None,:]-ids[:,None]) % len(a), persistent=False)
+        else:
+            self.position = nn.Sequential(nn.Linear(2, 16), nn.SiLU(), nn.Linear(16, self.dh))
+            self.direction = nn.Sequential(nn.Linear(2, 16), nn.SiLU(), nn.Linear(16, self.dh))
 
     def forward(self, x):
         b, n, g, c = x.shape
         q, k, v = self.qkv(x).reshape(b, n, g, 3, self.heads, self.dh).unbind(3)
         # [query direction, neighbor position, key direction, head dim]
-        e = self.position(self.local_coordinates)[:, :, None, :] + self.direction(self.relative_direction)[:, None, :, :]
+        if self.ge_aligned:
+            row = self.row_embedding(self.local_coordinates[..., :1].to(q.dtype))
+            col = self.col_embedding(self.local_coordinates[..., 1:].to(q.dtype))
+            group = self.group_embedding(self.relative_group).to(q.dtype)
+            e = torch.cat((row[:,:,None,:].expand(-1,-1,g,-1),
+                           col[:,:,None,:].expand(-1,-1,g,-1),
+                           group[:,None,:,:].expand(-1,19,-1,-1)), -1)
+        else:
+            e = self.position(self.local_coordinates)[:, :, None, :] + self.direction(self.relative_direction)[:, None, :, :]
         e = e.reshape(g, 19*g, self.dh).to(q.dtype)
         outputs = []
         for start in range(0, n, self.query_chunk):
@@ -70,24 +100,24 @@ class HexDirectionAttention(nn.Module):
             qc = q[:, start:stop].permute(0, 1, 3, 2, 4)
             kc = k[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
             vc = v[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
-            bias = torch.einsum('bnhgd,gkd->bnhgk', qc, e) / math.sqrt(self.dh)
+            bias = torch.einsum('bnhgd,gkd->bnhgk', qc, e) * self.scale
             valid = self.valid[start:stop, :, None].expand(-1, -1, g).flatten(1)
             bias = bias.masked_fill(~valid[None, :, None, None, :], float('-inf'))
             y = F.scaled_dot_product_attention(
                 qc.flatten(0, 1), kc.flatten(0, 1), vc.flatten(0, 1),
-                attn_mask=bias.flatten(0, 1)).reshape(b, stop-start, self.heads, g, self.dh)
+                attn_mask=bias.flatten(0, 1), scale=self.scale).reshape(b, stop-start, self.heads, g, self.dh)
             outputs.append(y.permute(0, 1, 3, 2, 4).reshape(b, stop-start, g, c))
         return self.proj(torch.cat(outputs, 1))
 
 
 class DirectionBlock(nn.Module):
     def __init__(self, coordinates, angles, dim=96, heads=3, query_chunk=16,
-                 checkpoint_attention=False, mlp_ratio=4.0):
+                 checkpoint_attention=False, mlp_ratio=4.0, ge_aligned=False):
         super().__init__()
-        self.norm1 = nn.LayerNorm(dim, eps=1e-6)
-        self.attn = HexDirectionAttention(dim, heads, coordinates, angles, query_chunk)
+        self.norm1 = TokenGroupNorm(dim) if ge_aligned else nn.LayerNorm(dim, eps=1e-6)
+        self.attn = HexDirectionAttention(dim, heads, coordinates, angles, query_chunk, ge_aligned)
         self.checkpoint_attention = checkpoint_attention
-        self.norm2 = nn.LayerNorm(dim, eps=1e-6)
+        self.norm2 = TokenGroupNorm(dim) if ge_aligned else nn.LayerNorm(dim, eps=1e-6)
         hidden = int(dim * mlp_ratio)
         self.mlp = nn.Sequential(nn.Linear(dim, hidden), nn.GELU(), nn.Linear(hidden, dim))
 
@@ -162,10 +192,11 @@ Whole-stage query batches remove the small-query loop. Only attention is
 checkpointed, not the FFN, and only in the first two (larger) stages.
 """
     def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True,
-                 full_circle=False):
+                 full_circle=False, ge_aligned=False):
         super().__init__()
         self.embed_dim = 336
         self.full_circle = bool(full_circle)
+        self.ge_aligned = bool(ge_aligned)
         period = 6 if full_circle else 12
         bases = 144
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
@@ -184,14 +215,19 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                 DirectionBlock(coordinates, angles, dim, heads,
                                query_chunk=len(coordinates),
                                checkpoint_attention=checkpoint_attention and i<2,
-                               mlp_ratio=4.0)
+                               mlp_ratio=4.0, ge_aligned=ge_aligned)
                 for _ in range(2)]))
             if i<2:
                 transition = HexSubsample(coordinates, dim, (288,336)[i])
                 self.transitions.append(transition)
                 coordinates = transition.coordinates
-        self.norm = nn.LayerNorm(336, eps=1e-6)
+        self.norm = TokenGroupNorm(336) if ge_aligned else nn.LayerNorm(336, eps=1e-6)
         self.head = nn.Linear(336, num_classes)
+        if ge_aligned:
+            # Match GE's Linear/Conv initializer; preserve the polar tokenizer's
+            # own initialization, just as GE preserves its custom lifting bank.
+            from model.gevit_tiny import GEViTTinyP4
+            self.apply(GEViTTinyP4._initialize)
 
     def forward(self, image):
         x = self.patch_embed(image)
@@ -199,7 +235,10 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
             x = stage(x)
             if i<2:
                 x = self.transitions[i](x)
-        return self.head(self.norm(x).mean(dim=(1,2)))
+        x = self.norm(x)
+        if self.ge_aligned:
+            return self.head(x).sum(dim=1).max(dim=1).values
+        return self.head(x.mean(dim=(1,2)))
 
     def experiment_diagnostics(self):
         return dict(stage_widths=[144,288,336], stage_depths=[2,2,2],
@@ -209,6 +248,10 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                     directions_degrees=[i*(60 if self.full_circle else 30) for i in range(6)],
                     neighborhood=19, strict_equivariance=False,
                     downsample='even/even axial selection after two blocks, shared linear',
-                    readout='space and direction mean',
+                    ge_aligned=self.ge_aligned,
+                    normalization='GroupNorm(1,C)' if self.ge_aligned else 'LayerNorm(C)',
+                    attention_scale='1/sqrt(C)' if self.ge_aligned else '1/sqrt(C/head)',
+                    relative_pe='concatenated xy MLPs and C6 embedding' if self.ge_aligned else 'summed spatial/direction MLPs',
+                    readout='class logits: space sum then direction max' if self.ge_aligned else 'space and direction mean',
                     checkpoint='attention only, stages 1 and 2',
                     query_chunk='entire stage')
