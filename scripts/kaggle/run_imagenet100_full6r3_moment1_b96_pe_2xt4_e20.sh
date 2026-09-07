@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo "[run] full6d3r 0/60/120/180/240/300 | 96 raw prototypes, shared 96->144 | GE-style pyramid 144/288/336 | 20 epochs | batch ${BATCH_SIZE:-256}/GPU"
+echo "[run] full6d3r | 96 bases | first moment ->192 | null-softmax + PE only | 20 epochs"
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE:-2}" \
   -m experiments.imagenet100.train_vit \
-  --config configs/imagenet100/hex_direction_pyramid_full6r3_ddp_e20.json \
+  --config configs/imagenet100/rot_hex_full6r3_moment1_b96_pe_ddp_e20.json \
   --data-root "${DATA_ROOT:-/kaggle/input/datasets/ambityga/imagenet100}" \
   --output-root "${OUTPUT_ROOT:-/kaggle/working/runs}" \
   --batch-size "${BATCH_SIZE:-256}"

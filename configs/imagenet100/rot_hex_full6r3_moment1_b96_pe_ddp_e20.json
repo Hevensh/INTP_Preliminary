@@ -1,14 +1,13 @@
 {
-  "experiment_name": "hex_direction_pyramid_full6r3_b96_144_288_336_ffn4_imagenet100_ddp_e20",
+  "experiment_name": "rot_hex_full6r3_moment1_b96_pe_imagenet100_ddp_e20",
   "data_root": "/kaggle/input/datasets/ambityga/imagenet100",
   "output_root": "/kaggle/working/runs",
   "model": "deit_tiny_patch16_224",
-  "model_variant": "hex_direction_pyramid_full6",
+  "model_variant": "rot_hex_harmonic_softmax_pe",
   "num_classes": 100,
   "image_size": 224,
   "pretrained": false,
   "epochs": 20,
-  "schedule_epochs": 20,
   "batch_size": 256,
   "num_workers": 4,
   "learning_rate": 0.0005,
@@ -26,5 +25,22 @@
   "max_val_steps": null,
   "progress_interval_seconds": 60,
   "resume": null,
-  "hex_stride": 18
+  "hex_stride": 18,
+  "rot_kernel_sizes": [
+    24,
+    12
+  ],
+  "rot_bases": 96,
+  "rot_directions": 6,
+  "rot_global_directions": 6,
+  "rot_angular_bins_per_radius": 3,
+  "rot_prototype_chunk_size": 16,
+  "rot_use_null": true,
+  "rot_null_initial_score": 0,
+  "rot_progressive_differentiation": false,
+  "rot_harmonic_orders": [
+    1
+  ],
+  "rot_output_groups": 1,
+  "schedule_epochs": 20
 }

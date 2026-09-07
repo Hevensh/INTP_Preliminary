@@ -1,5 +1,18 @@
 # Full6d3r: two independent20-epoch experiments
 
+UPDATE: recommended versions now both have96 prototypes. PE-only uses ONLY
+first-order cos/sin, no grouping: `rot_hex_full6r3_moment1_b96_pe_ddp_e20.json`
+(5,463,556 parameters). Pyramid retains raw six-direction responses, no moment
+projection; a direction-shared96->144 linear map connects to144/288/336 stages
+(5,490,468 parameters). Its run name now includes b96. Both AMP backward tests
+pass. Old192-prototype dual-moment config below is historical, not recommended.
+
+Current commands:
+
+`!bash scripts/kaggle/run_imagenet100_full6r3_moment1_b96_pe_2xt4_e20.sh`
+
+`!bash scripts/kaggle/run_imagenet100_hex_direction_pyramid_full6r3_2xt4_e20.sh`
+
 Full6 means0/60/120/180/240/300 degrees, NOT the previous half6 angles.
 Polar storage r3 and K24/K12 remain unchanged. Both use the same20-epoch LR
 horizon, LR5e-4,2warmup epochs, seed0, batch256/GPU,2GPUs. Planned host account:
