@@ -165,10 +165,11 @@ class HexDirectionViT(nn.Module):
 class HexSubsample(nn.Module):
     """Keep the even/even axial sublattice after two neighborhood blocks.
 
-No additional spatial pooling: preceding attention already aggregates neighbors.
+Default retains legacy selection. Optional pool_neighbors performs center+six
+max pooling only at retained centers, before the shared channel projection.
 New coordinates are divided by two so a two-ring window grows in image units.
 """
-    def __init__(self, coordinates, in_dim, out_dim):
+    def __init__(self, coordinates, in_dim, out_dim, pool_neighbors=False):
         super().__init__()
         xy = coordinates.detach().cpu().double()
         r = xy[:, 1]*2/math.sqrt(3)
@@ -179,10 +180,29 @@ New coordinates are divided by two so a two-ring window grows in image units.
         keep = (qr.round().long().remainder(2)==0).all(-1).nonzero().flatten()
         self.register_buffer('keep', keep, persistent=False)
         self.register_buffer('coordinates', coordinates[keep]/2, persistent=False)
+        self.pool_neighbors = bool(pool_neighbors)
+        if self.pool_neighbors:
+            lattice = qr.round().long().tolist()
+            lookup = {tuple(v): i for i, v in enumerate(lattice)}
+            offsets = [(0,0), (1,0), (0,1), (-1,1), (-1,0), (0,-1), (1,-1)]
+            indices = torch.tensor([
+                [lookup.get((lattice[i][0]+dq, lattice[i][1]+dr), -1)
+                 for dq, dr in offsets] for i in keep.tolist()])
+            self.register_buffer('pool_indices', indices.clamp_min(0), persistent=False)
+            self.register_buffer('pool_valid', indices >= 0, persistent=False)
         self.proj = nn.Linear(in_dim, out_dim)
 
     def forward(self, x):
-        return self.proj(x[:, self.keep])
+        if self.pool_neighbors:
+            # Gather only retained centers, never materialize dense pooled output.
+            # Keep orientation and channel axes separate. Missing neighbors must
+            # not introduce zeros into an otherwise negative-valued neighborhood.
+            local = x[:, self.pool_indices]
+            local = local.masked_fill(~self.pool_valid[None,:,:,None,None], float('-inf'))
+            x = local.max(dim=2).values
+        else:
+            x = x[:, self.keep]
+        return self.proj(x)
 
 
 class HexDirectionPyramid(nn.Module):
@@ -192,11 +212,12 @@ Whole-stage query batches remove the small-query loop. Only attention is
 checkpointed, not the FFN, and only in the first two (larger) stages.
 """
     def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True,
-                 full_circle=False, ge_aligned=False):
+                 full_circle=False, ge_aligned=False, pool_neighbors=False):
         super().__init__()
         self.embed_dim = 336
         self.full_circle = bool(full_circle)
         self.ge_aligned = bool(ge_aligned)
+        self.pool_neighbors = bool(pool_neighbors)
         period = 6 if full_circle else 12
         bases = 144
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
@@ -218,7 +239,7 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                                mlp_ratio=4.0, ge_aligned=ge_aligned)
                 for _ in range(2)]))
             if i<2:
-                transition = HexSubsample(coordinates, dim, (288,336)[i])
+                transition = HexSubsample(coordinates, dim, (288,336)[i], pool_neighbors)
                 self.transitions.append(transition)
                 coordinates = transition.coordinates
         self.norm = TokenGroupNorm(336) if ge_aligned else nn.LayerNorm(336, eps=1e-6)
@@ -247,7 +268,8 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                     tokenizer_bases=self.patch_embed.bases, tokenizer_storage='variable-ring polar r3',
                     directions_degrees=[i*(60 if self.full_circle else 30) for i in range(6)],
                     neighborhood=19, strict_equivariance=False,
-                    downsample='even/even axial selection after two blocks, shared linear',
+                    downsample=('retained centers: center+6 max pool, shared linear' if self.pool_neighbors
+                                else 'even/even axial selection after two blocks, shared linear'),
                     ge_aligned=self.ge_aligned,
                     normalization='GroupNorm(1,C)' if self.ge_aligned else 'LayerNorm(C)',
                     attention_scale='1/sqrt(C)' if self.ge_aligned else '1/sqrt(C/head)',

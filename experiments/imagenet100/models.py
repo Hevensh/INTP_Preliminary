@@ -18,6 +18,7 @@ MODEL_VARIANTS = {
     "hex_direction_pyramid",
     "hex_direction_pyramid_full6",
     "hex_direction_pyramid_full6_ge_aligned",
+    "hex_direction_pyramid_full6_ge_aligned_pool7",
     "hex_direction_local96",
     "deit_tiny", "hex_patch", "equi_gmr_pe", "arc_adaptive_pe",
     "gevit_p4_local",
@@ -99,11 +100,12 @@ def build_imagenet100_model(
             f"{variant} ImageNet-100 comparison is a from-scratch experiment; "
             "set pretrained=false"
         )
-    if variant in {"hex_direction_pyramid", "hex_direction_pyramid_full6", "hex_direction_pyramid_full6_ge_aligned"}:
+    if variant in {"hex_direction_pyramid", "hex_direction_pyramid_full6", "hex_direction_pyramid_full6_ge_aligned", "hex_direction_pyramid_full6_ge_aligned_pool7"}:
         from model.hex_direction_vit import HexDirectionPyramid
         return HexDirectionPyramid(image_size=image_size, num_classes=num_classes,
                                    full_circle=variant != 'hex_direction_pyramid',
-                                   ge_aligned=variant.endswith('_ge_aligned'))
+                                   ge_aligned='_ge_aligned' in variant,
+                                   pool_neighbors=variant.endswith('_pool7'))
     if variant == "hex_direction_local96":
         from model.hex_direction_vit import HexDirectionViT
         return HexDirectionViT(image_size=image_size, num_classes=num_classes)

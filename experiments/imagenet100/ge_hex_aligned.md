@@ -34,3 +34,20 @@ Run (same 20-epoch schedule and batch 256 per GPU):
 
 Validation: explicit attention reference including gradients, GroupNorm layout
 equivalence, classifier readout, plus legacy direction-model regression tests.
+
+## Optional retained-center pooling experiment
+
+The separate `hex_direction_pyramid_full6_ge_aligned_pool7` variant now implements
+the proposed center-plus-six-neighbor max pooling. It gathers seven positions
+only for retained coarse centers, then pools independently per direction/channel
+and applies the existing shared Linear. Missing boundary neighbors are masked
+with negative infinity. No dense fine-grid pooled tensor is constructed.
+Token counts and trainable parameter count (5,499,456) are unchanged. The original
+aligned selection-only configuration remains unchanged for comparison.
+
+```bash
+!bash scripts/kaggle/run_imagenet100_hex_direction_pyramid_full6r3_ge_aligned_pool7_2xt4_e20.sh
+```
+
+Validated: 11 tests including a direct neighborhood pooling/gradient reference,
+and 224px batch-2 CUDA AMP forward/backward. Full training speed is not measured.
