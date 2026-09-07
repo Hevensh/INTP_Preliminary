@@ -161,16 +161,19 @@ class HexDirectionPyramid(nn.Module):
 Whole-stage query batches remove the small-query loop. Only attention is
 checkpointed, not the FFN, and only in the first two (larger) stages.
 """
-    def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True):
+    def __init__(self, image_size=224, num_classes=100, checkpoint_attention=True,
+                 full_circle=False):
         super().__init__()
         self.embed_dim = 336
+        self.full_circle = bool(full_circle)
+        period = 6 if full_circle else 12
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
             img_size=image_size, in_chans=3, embed_dim=144, bases=144,
-            directions=6, global_directions=12, angular_bins_per_radius=3,
+            directions=6, global_directions=period, angular_bins_per_radius=3,
             raw_direction_output=True, kernel_sizes=(24,12))
         coo = self.patch_embed.coo_patchs
         coordinates = torch.stack((coo.real, coo.imag), -1)
-        angles = torch.arange(6)*math.pi/6
+        angles = torch.arange(6)*2*math.pi/period
         self.stages = nn.ModuleList()
         self.transitions = nn.ModuleList()
         self.token_counts = []
@@ -202,7 +205,7 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                     stage_heads=[3,3,3], stage_tokens=self.token_counts,
                     mlp_ratio=4.0, mlp_hidden=[576,1152,1344],
                     tokenizer_bases=144, tokenizer_storage='variable-ring polar r3',
-                    directions_degrees=[0,30,60,90,120,150],
+                    directions_degrees=[i*(60 if self.full_circle else 30) for i in range(6)],
                     neighborhood=19, strict_equivariance=False,
                     downsample='even/even axial selection after two blocks, shared linear',
                     readout='space and direction mean',

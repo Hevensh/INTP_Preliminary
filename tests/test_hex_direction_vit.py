@@ -50,6 +50,19 @@ def test_pyramid_geometry():
     assert [s[0].mlp[0].out_features for s in m.stages] == [576,1152,1344]
 
 
+def test_full6_pyramid_angles():
+    m=HexDirectionPyramid(full_circle=True)
+    a=torch.arange(6)*math.pi/3
+    torch.testing.assert_close(m.patch_embed.direction_coefficients,
+                               torch.stack((a.cos(),a.sin()),-1))
+    assert m.experiment_diagnostics()['directions_degrees']==[0,60,120,180,240,300]
+    # Relative PE must use the same60-degree grid as the tokenizer.
+    d=a[None,:]-a[:,None]
+    torch.testing.assert_close(m.stages[0][0].attn.relative_direction,
+                               torch.stack((d.cos(),d.sin()),-1))
+    assert m.token_counts==[195,52,14]
+
+
 def test_attention_checkpoint_equivalence():
     xy=torch.tensor([(0.,0.),(1.,0.),(.5,math.sqrt(3)/2)])
     args=(xy,torch.arange(6)*math.pi/6)
