@@ -52,8 +52,8 @@ def test_pyramid_geometry():
 
 def test_full6_pyramid_angles():
     m=HexDirectionPyramid(full_circle=True)
-    assert m.patch_embed.prototype.shape == (96,3,234)
-    assert m.input_proj.in_features == 96 and m.input_proj.out_features == 144
+    assert m.patch_embed.prototype.shape == (144,3,234)
+    assert not hasattr(m, 'input_proj')
     assert m.patch_embed.raw_direction_output
     assert not m.patch_embed.pose_softmax
     a=torch.arange(6)*math.pi/3

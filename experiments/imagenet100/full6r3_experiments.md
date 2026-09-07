@@ -1,10 +1,10 @@
 # Full6d3r: two independent20-epoch experiments
 
-UPDATE: recommended versions now both have96 prototypes. PE-only uses ONLY
+UPDATE: PE-only has96 prototypes and uses ONLY
 first-order cos/sin, no grouping: `rot_hex_full6r3_moment1_b96_pe_ddp_e20.json`
-(5,463,556 parameters). Pyramid retains raw six-direction responses, no moment
-projection; a direction-shared96->144 linear map connects to144/288/336 stages
-(5,490,468 parameters). Its run name now includes b96. Both AMP backward tests
+(5,463,556 parameters). Pyramid uses144 prototypes and retains raw six-direction
+responses, no moment or input projection, directly feeding144/288/336 stages
+(5,510,244 parameters). The abandoned b96 projection variant is not used. Both AMP backward tests
 pass. Old192-prototype dual-moment config below is historical, not recommended.
 
 Current commands:

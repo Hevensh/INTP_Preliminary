@@ -167,12 +167,11 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         self.embed_dim = 336
         self.full_circle = bool(full_circle)
         period = 6 if full_circle else 12
-        bases = 96 if full_circle else 144
+        bases = 144
         self.patch_embed = HexRotatingHarmonicPatchEmbed(
             img_size=image_size, in_chans=3, embed_dim=bases, bases=bases,
             directions=6, global_directions=period, angular_bins_per_radius=3,
             raw_direction_output=True, kernel_sizes=(24,12))
-        self.input_proj = nn.Linear(bases,144) if bases != 144 else nn.Identity()
         coo = self.patch_embed.coo_patchs
         coordinates = torch.stack((coo.real, coo.imag), -1)
         angles = torch.arange(6)*2*math.pi/period
@@ -195,7 +194,7 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
         self.head = nn.Linear(336, num_classes)
 
     def forward(self, image):
-        x = self.input_proj(self.patch_embed(image))
+        x = self.patch_embed(image)
         for i, stage in enumerate(self.stages):
             x = stage(x)
             if i<2:
