@@ -50,6 +50,7 @@ class HexDirectionAttention(nn.Module):
         self.ge_aligned = ge_aligned
         self.scale = (dim if ge_aligned else self.dh) ** -0.5
         self.groups, self.query_chunk = len(angles), query_chunk
+        self.checkpoint_chunks = False
         indices, valid, delta = hex_neighbors(coordinates)
         self.register_buffer('indices', indices, persistent=False)
         self.register_buffer('valid', valid, persistent=False)
@@ -96,17 +97,22 @@ class HexDirectionAttention(nn.Module):
         outputs = []
         for start in range(0, n, self.query_chunk):
             stop = min(n, start+self.query_chunk)
-            ix = self.indices[start:stop]
-            qc = q[:, start:stop].permute(0, 1, 3, 2, 4)
-            kc = k[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
-            vc = v[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
-            bias = torch.einsum('bnhgd,gkd->bnhgk', qc, e) * self.scale
-            valid = self.valid[start:stop, :, None].expand(-1, -1, g).flatten(1)
-            bias = bias.masked_fill(~valid[None, :, None, None, :], float('-inf'))
-            y = F.scaled_dot_product_attention(
-                qc.flatten(0, 1), kc.flatten(0, 1), vc.flatten(0, 1),
-                attn_mask=bias.flatten(0, 1), scale=self.scale).reshape(b, stop-start, self.heads, g, self.dh)
-            outputs.append(y.permute(0, 1, 3, 2, 4).reshape(b, stop-start, g, c))
+            # Bind bounds: checkpoint recomputes after the loop has finished.
+            def attend(qc, k, v, e, start=start, stop=stop):
+                ix = self.indices[start:stop]
+                qc = qc.permute(0, 1, 3, 2, 4)
+                kc = k[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
+                vc = v[:, ix].permute(0, 1, 4, 2, 3, 5).flatten(3, 4)
+                bias = torch.einsum('bnhgd,gkd->bnhgk', qc, e) * self.scale
+                valid = self.valid[start:stop, :, None].expand(-1, -1, g).flatten(1)
+                bias = bias.masked_fill(~valid[None, :, None, None, :], float('-inf'))
+                y = F.scaled_dot_product_attention(
+                    qc.flatten(0, 1), kc.flatten(0, 1), vc.flatten(0, 1),
+                    attn_mask=bias.flatten(0, 1), scale=self.scale)
+                return y.reshape(b, stop-start, self.heads, g, self.dh).permute(0,1,3,2,4).reshape(b,stop-start,g,c)
+            args = (q[:,start:stop], k, v, e)
+            outputs.append(checkpoint(attend, *args, use_reentrant=False)
+                           if self.training and self.checkpoint_chunks else attend(*args))
         return self.proj(torch.cat(outputs, 1))
 
 
@@ -117,6 +123,7 @@ class DirectionBlock(nn.Module):
         self.norm1 = TokenGroupNorm(dim) if ge_aligned else nn.LayerNorm(dim, eps=1e-6)
         self.attn = HexDirectionAttention(dim, heads, coordinates, angles, query_chunk, ge_aligned)
         self.checkpoint_attention = checkpoint_attention
+        self.checkpoint_mlp = False
         self.norm2 = TokenGroupNorm(dim) if ge_aligned else nn.LayerNorm(dim, eps=1e-6)
         hidden = int(dim * mlp_ratio)
         self.mlp = nn.Sequential(nn.Linear(dim, hidden), nn.GELU(), nn.Linear(hidden, dim))
@@ -126,7 +133,10 @@ class DirectionBlock(nn.Module):
         z = (checkpoint(self.attn, z, use_reentrant=False)
              if self.training and self.checkpoint_attention else self.attn(z))
         x = x + z
-        return x + self.mlp(self.norm2(x))
+        def feed_forward(x):
+            return self.mlp(self.norm2(x))
+        return x + (checkpoint(feed_forward, x, use_reentrant=False)
+                    if self.training and self.checkpoint_mlp else feed_forward(x))
 
 
 class HexDirectionViT(nn.Module):
@@ -238,6 +248,14 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                                checkpoint_attention=checkpoint_attention and i<2,
                                mlp_ratio=4.0, ge_aligned=ge_aligned)
                 for _ in range(2)]))
+            if ge_aligned:
+                for block in self.stages[-1]:
+                    # Per-chunk recomputation bounds BOTH forward and backward
+                    # expanded K/V; whole-attention checkpointing does not.
+                    block.attn.query_chunk = min(16, len(coordinates))
+                    block.attn.checkpoint_chunks = checkpoint_attention
+                    block.checkpoint_attention = False
+                    block.checkpoint_mlp = checkpoint_attention
             if i<2:
                 transition = HexSubsample(coordinates, dim, (288,336)[i], pool_neighbors)
                 self.transitions.append(transition)
@@ -275,5 +293,6 @@ checkpointed, not the FFN, and only in the first two (larger) stages.
                     attention_scale='1/sqrt(C)' if self.ge_aligned else '1/sqrt(C/head)',
                     relative_pe='concatenated xy MLPs and C6 embedding' if self.ge_aligned else 'summed spatial/direction MLPs',
                     readout='class logits: space sum then direction max' if self.ge_aligned else 'space and direction mean',
-                    checkpoint='attention only, stages 1 and 2',
-                    query_chunk='entire stage')
+                    checkpoint=('per-query-chunk attention + norm/FFN' if self.ge_aligned
+                                else 'attention only, stages 1 and 2'),
+                    query_chunk=16 if self.ge_aligned else 'entire stage')

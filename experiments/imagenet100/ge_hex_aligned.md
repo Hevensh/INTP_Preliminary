@@ -51,3 +51,17 @@ aligned selection-only configuration remains unchanged for comparison.
 
 Validated: 11 tests including a direct neighborhood pooling/gradient reference,
 and 224px batch-2 CUDA AMP forward/backward. Full training speed is not measured.
+
+## Memory-bounded aligned attention
+
+Aligned variants now gather at most 16 query neighborhoods at once, checkpoint
+each gather/attention chunk separately, and checkpoint norm2/FFN. QKV remains
+shared across chunks. This avoids retaining all expanded neighborhoods during
+backward recomputation of a whole-attention checkpoint. It changes neither
+parameters nor pooling, attention windows, batch size, or optimization schedule.
+The same pool7 script selects this implementation; old checkpoints remain loadable.
+
+Local CUDA AMP AdamW, batch16, 224px, three steps: peak allocated memory fell
+from 851.13 MiB to 437.50 MiB (48.6%). Warm steps were about 87-88 ms before,
+109-124 ms after. These are local microbenchmarks, not T4 batch256 guarantees.
+Twelve tests pass including full/chunked attention input and parameter gradients.
