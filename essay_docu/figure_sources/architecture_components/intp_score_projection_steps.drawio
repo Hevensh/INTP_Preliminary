@@ -1,0 +1,25 @@
+<mxfile host="app.diagrams.net" modified="2026-08-29T13:45:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="score-projection" name="Score projection steps">
+    <mxGraphModel dx="900" dy="290" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="290" math="1" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="label-1" value="null-softmax" style="text;html=1;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#646ba8;" vertex="1" parent="1">
+          <mxGeometry x="35" y="18" width="320" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="formula-1" value="$$p_{r,\theta}=\frac{s_{r,\theta}}{\sum s}$$" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#f6f7ff;strokeColor=#7d86d9;strokeWidth=2;fontFamily=Times New Roman;fontSize=20;fontColor=#202124;" vertex="1" parent="1">
+          <mxGeometry x="35" y="58" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="label-2" value="cos/sin project" style="text;html=1;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=18;fontStyle=1;fontColor=#646ba8;" vertex="1" parent="1">
+          <mxGeometry x="465" y="18" width="320" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="formula-2" value="$$\begin{aligned}C&amp;=\sum_{r,\theta}p_{r,\theta}\cos\theta\\S&amp;=\sum_{r,\theta}p_{r,\theta}\sin\theta\end{aligned}$$" style="rounded=1;whiteSpace=wrap;html=1;align=center;verticalAlign=middle;fillColor=#f6f7ff;strokeColor=#7d86d9;strokeWidth=2;fontFamily=Times New Roman;fontSize=20;fontColor=#202124;" vertex="1" parent="1">
+          <mxGeometry x="465" y="58" width="320" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="step-arrow" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#7d86d9;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="formula-1" target="formula-2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

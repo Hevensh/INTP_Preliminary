@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="380" viewBox="0 0 380 380">
+<g font-family="Arial, Helvetica, sans-serif">
+<path d="M 155.628,95.079 L 145.183,54.398 A 140.000,140.000 0 0 1 214.817,54.398 L 204.372,95.079 A 98.000,98.000 0 0 0 155.628,95.079 Z" fill="#f3883b" fill-opacity="1.000" stroke="#ffffff" stroke-width="2"/>
+<path d="M 206.354,95.610 L 217.649,55.157 A 140.000,140.000 0 0 1 277.953,89.974 L 248.567,119.982 A 98.000,98.000 0 0 0 206.354,95.610 Z" fill="#f3883b" fill-opacity="0.674" stroke="#ffffff" stroke-width="2"/>
+<path d="M 250.018,121.433 L 280.026,92.047 A 140.000,140.000 0 0 1 314.843,152.351 L 274.390,163.646 A 98.000,98.000 0 0 0 250.018,121.433 Z" fill="#f3883b" fill-opacity="0.450" stroke="#ffffff" stroke-width="2"/>
+<path d="M 274.921,165.628 L 315.602,155.183 A 140.000,140.000 0 0 1 315.602,224.817 L 274.921,214.372 A 98.000,98.000 0 0 0 274.921,165.628 Z" fill="#f3883b" fill-opacity="0.355" stroke="#ffffff" stroke-width="2"/>
+<path d="M 274.390,216.354 L 314.843,227.649 A 140.000,140.000 0 0 1 280.026,287.953 L 250.018,258.567 A 98.000,98.000 0 0 0 274.390,216.354 Z" fill="#f3883b" fill-opacity="0.435" stroke="#ffffff" stroke-width="2"/>
+<path d="M 248.567,260.018 L 277.953,290.026 A 140.000,140.000 0 0 1 217.649,324.843 L 206.354,284.390 A 98.000,98.000 0 0 0 248.567,260.018 Z" fill="#f3883b" fill-opacity="0.960" stroke="#ffffff" stroke-width="2"/>
+<path d="M 166.571,137.697 L 156.126,97.016 A 96.000,96.000 0 0 1 203.874,97.016 L 193.429,137.697 A 54.000,54.000 0 0 0 166.571,137.697 Z" fill="#f3883b" fill-opacity="0.312" stroke="#ffffff" stroke-width="2"/>
+<path d="M 194.522,137.989 L 205.816,97.536 A 96.000,96.000 0 0 1 247.168,121.411 L 217.782,151.418 A 54.000,54.000 0 0 0 194.522,137.989 Z" fill="#f3883b" fill-opacity="0.232" stroke="#ffffff" stroke-width="2"/>
+<path d="M 218.582,152.218 L 248.589,122.832 A 96.000,96.000 0 0 1 272.464,164.184 L 232.011,175.478 A 54.000,54.000 0 0 0 218.582,152.218 Z" fill="#f3883b" fill-opacity="0.160" stroke="#ffffff" stroke-width="2"/>
+<path d="M 232.303,176.571 L 272.984,166.126 A 96.000,96.000 0 0 1 272.984,213.874 L 232.303,203.429 A 54.000,54.000 0 0 0 232.303,176.571 Z" fill="#f3883b" fill-opacity="0.120" stroke="#ffffff" stroke-width="2"/>
+<path d="M 232.011,204.522 L 272.464,215.816 A 96.000,96.000 0 0 1 248.589,257.168 L 218.582,227.782 A 54.000,54.000 0 0 0 232.011,204.522 Z" fill="#f3883b" fill-opacity="0.178" stroke="#ffffff" stroke-width="2"/>
+<path d="M 217.782,228.582 L 247.168,258.589 A 96.000,96.000 0 0 1 205.816,282.464 L 194.522,242.011 A 54.000,54.000 0 0 0 217.782,228.582 Z" fill="#f3883b" fill-opacity="0.265" stroke="#ffffff" stroke-width="2"/>
+<text x="180.00" y="37.00" text-anchor="middle" font-size="14" fill="#202124">0°</text>
+<text x="259.00" y="58.17" text-anchor="middle" font-size="14" fill="#202124">30°</text>
+<text x="316.83" y="116.00" text-anchor="middle" font-size="14" fill="#202124">60°</text>
+<text x="338.00" y="195.00" text-anchor="middle" font-size="14" fill="#202124">90°</text>
+<text x="316.83" y="274.00" text-anchor="middle" font-size="14" fill="#202124">120°</text>
+<text x="259.00" y="331.83" text-anchor="middle" font-size="14" fill="#202124">150°</text>
+<circle cx="180.0" cy="190.0" r="39.0" fill="#f3883b" fill-opacity="0.927"/>
+<text x="180.0" y="188.0" text-anchor="middle" font-size="15" font-weight="700" fill="#202124">null</text>
+</g>
+</svg>

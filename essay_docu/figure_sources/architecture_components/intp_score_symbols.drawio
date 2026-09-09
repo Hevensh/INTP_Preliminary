@@ -1,0 +1,13 @@
+<mxfile host="app.diagrams.net" modified="2026-08-29T13:30:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="score-symbols" name="Score symbols">
+    <mxGraphModel dx="320" dy="230" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="320" pageHeight="230" math="1" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="score-symbols" value="" style="shape=image;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=0;aspect=fixed;image=data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22240%22%20height%3D%22220%22%20viewBox%3D%220%200%20240%20220%22%3E%0A%20%20%3Cg%20fill%3D%22%23202124%22%20font-family%3D%22Times%20New%20Roman%2C%20serif%22%20text-anchor%3D%22middle%22%3E%0A%20%20%20%20%3Ctext%20x%3D%22120%22%20y%3D%2254%22%20font-size%3D%2242%22%20font-style%3D%22italic%22%3ES%3Ctspan%20baseline-shift%3D%22sub%22%20font-size%3D%2226%22%20font-style%3D%22normal%22%3Er%2C%CE%B8%3C%2Ftspan%3E%3C%2Ftext%3E%0A%20%20%20%20%3Ctext%20x%3D%22120%22%20y%3D%22186%22%20font-size%3D%2242%22%20font-style%3D%22italic%22%3ES%3Ctspan%20baseline-shift%3D%22sub%22%20font-size%3D%2226%22%20font-style%3D%22normal%22%3Enull%3C%2Ftspan%3E%3C%2Ftext%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E%0A;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="240" height="220" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

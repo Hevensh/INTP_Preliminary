@@ -1,0 +1,48 @@
+\documentclass[border=8pt]{standalone}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\setmainfont{TeX Gyre Termes}
+\setCJKmainfont{SimSun}
+\newcommand{\yes}{$\checkmark$}
+\newcommand{\no}{--}
+\definecolor{thirdblue}{HTML}{2F6DB2}
+\newcommand{\third}[1]{\textcolor{thirdblue}{#1}}
+
+\begin{document}
+\begin{minipage}{19.2cm}
+  \centering
+  \small
+  \setlength{\tabcolsep}{7.2pt}
+  \renewcommand{\arraystretch}{1.22}
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    & \multicolumn{2}{c}{$0^\circ$ 验证} & \multicolumn{3}{c}{局部旋转均值} & \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-6}
+    模型 & Top-1 & Top-5 & Top-1 & Top-5 & $100\!\times$ JSD $\downarrow$ & 参数量 (M) \\
+    \midrule
+    Standard DeiT-Tiny             & 51.54\% & 79.12\% & 49.91\% & 77.45\% & \third{5.27} & 5.544 \\
+    SHARE half4d4r + Image Look    & \third{53.68\%} & \third{80.46\%} & \third{51.25\%} & \third{78.89\%} & 5.65 & 5.501 \\
+    SHARE half6d3r + dual Look     & \underline{55.52\%} & \underline{81.80\%} & \underline{52.82\%} & \textbf{79.98\%} & 5.64 & 5.497 \\
+    Equi-ViT / GMR                 & 41.52\% & 70.40\% & 41.08\% & 70.12\% & \textbf{3.22} & 5.424 \\
+    ARC Adaptive                   & 49.38\% & 76.56\% & 47.76\% & 75.70\% & \underline{5.25} & 5.986 \\
+    GE-ViT p4 local                & \textbf{56.06\%} & \textbf{82.04\%} & \textbf{52.94\%} & \underline{79.45\%} & 5.88 & 5.509 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.28cm}
+  \footnotesize
+  六个模型均使用同一组 5,000 张验证图。局部旋转均值覆盖
+  $\pm5^\circ,\ldots,\pm30^\circ$。令
+  $m=\tfrac12(p_\theta+p_0)$，则
+  $\mathrm{JSD}(p_\theta,p_0)=\tfrac12D_{\mathrm{KL}}(p_\theta\Vert m)
+  +\tfrac12D_{\mathrm{KL}}(p_0\Vert m)$；表中报告跨样本与角度平均后的
+  $100\times\mathrm{JSD}$。粗体、下划线、蓝色分别表示每个评价指标的
+  第一、第二、第三名。参数量为可训练参数，以百万（M）计。
+\end{minipage}
+\end{document}
