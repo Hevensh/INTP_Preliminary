@@ -1,0 +1,112 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{dosovitskiy2021vit,touvron2021deit}
+\citation{beyer2023flexivit}
+\citation{havtorn2023msvit}
+\citation{wu2021irpe}
+\citation{heo2024ropevit}
+\citation{rojasgomez2024shiftequiv}
+\citation{liu2021swin}
+\citation{chu2021cpvt}
+\citation{cohen2016gcnn}
+\citation{zhou2017orn}
+\citation{worrall2017harmonic}
+\citation{hoogeboom2018hexaconv}
+\citation{xu2023e2vit}
+\citation{karella2024harmformer}
+\citation{kundu2025steerable}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{dosovitskiy2021vit}
+\citation{touvron2021deit}
+\citation{liu2021swin}
+\citation{wu2021irpe}
+\citation{chu2021cpvt}
+\citation{heo2024ropevit}
+\citation{rojasgomez2024shiftequiv}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Overview of SHARE-ViT{}. Hex Tokenization constructs the shared lattice, MAMS Projection extracts multi-scale multi-pose token features, and Image and Feature \textsc  {Look}{} paths inject complementary directed attention biases across the Transformer backbone.}}{2}{figure.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:architecture}{{1}{2}{Overview of \method {}. Hex Tokenization constructs the shared lattice, MAMS Projection extracts multi-scale multi-pose token features, and Image and Feature \look {} paths inject complementary directed attention biases across the Transformer backbone}{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Visual tokenization and spatial bias.}{2}{section*.2}\protected@file@percent }
+\citation{beyer2023flexivit}
+\citation{havtorn2023msvit}
+\citation{cohen2016gcnn}
+\citation{zhou2017orn}
+\citation{worrall2017harmonic}
+\citation{chen2026equivit}
+\citation{xu2023e2vit}
+\citation{kundu2025steerable}
+\citation{karella2024harmformer}
+\citation{hoogeboom2018hexaconv}
+\@writefile{toc}{\contentsline {paragraph}{Flexible visual tokenization.}{3}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Rotation-aware representations.}{3}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hexagonal image processing.}{3}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Method}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Overview}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Hexagonal patch centers}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{eq:cover}{{1}{3}{Hexagonal patch centers}{equation.3.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Variable-resolution polar prototypes}{3}{subsection.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Hex-centered and shared angle--scale geometry. A compact variable-resolution polar prototype is rendered at two support sizes and six half-turn poses. The displayed kernels come from a trained model; the figure illustrates parameter sharing rather than an equivariance proof.}}{4}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:kernels}{{2}{4}{Hex-centered and shared angle--scale geometry. A compact variable-resolution polar prototype is rendered at two support sizes and six half-turn poses. The displayed kernels come from a trained model; the figure illustrates parameter sharing rather than an equivariance proof}{figure.caption.6}{}}
+\newlabel{eq:match}{{2}{4}{Variable-resolution polar prototypes}{equation.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Null-softmax circular-moment projection}{4}{subsection.3.4}\protected@file@percent }
+\newlabel{eq:null}{{3}{4}{Null-softmax circular-moment projection}{equation.3.3}{}}
+\newlabel{eq:harmonic}{{4}{4}{Null-softmax circular-moment projection}{equation.3.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Image-conditioned \textsc  {Look}{} bias}{4}{subsection.3.5}\protected@file@percent }
+\newlabel{sec:image-look}{{3.5}{4}{Image-conditioned \look {} bias}{subsection.3.5}{}}
+\citation{chen2026equivit}
+\citation{pu2023arc}
+\citation{xu2023e2vit}
+\newlabel{eq:image-look}{{5}{5}{Image-conditioned \look {} bias}{equation.3.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Token-conditioned Feature \textsc  {Look}{}}{5}{subsection.3.6}\protected@file@percent }
+\newlabel{sec:center-look}{{3.6}{5}{Token-conditioned Feature \look {}}{subsection.3.6}{}}
+\newlabel{eq:center-probe}{{6}{5}{Token-conditioned Feature \look {}}{equation.3.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}Transformer backbone}{5}{subsection.3.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experiments}{5}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Dataset and training protocol}{5}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Compared configurations}{5}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{6}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Main comparison and local rotation response}{6}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Local re-evaluation of the six saved checkpoints. The $0^\circ $ columns evaluate the unrotated 5,000-image ImageNet-100 validation set. Local means average the 12 nonzero rotations from $-30^\circ $ to $+30^\circ $ in $5^\circ $ increments. JSD is the mean Jensen--Shannon divergence from each model's own $0^\circ $ predictive distribution and is confidence-sensitive.}}{6}{table.1}\protected@file@percent }
+\newlabel{tab:main}{{1}{6}{Local re-evaluation of the six saved checkpoints. The $0^\circ $ columns evaluate the unrotated 5,000-image ImageNet-100 validation set. Local means average the 12 nonzero rotations from $-30^\circ $ to $+30^\circ $ in $5^\circ $ increments. JSD is the mean Jensen--Shannon divergence from each model's own $0^\circ $ predictive distribution and is confidence-sensitive}{table.1}{}}
+\newlabel{eq:rotation-jsd}{{7}{6}{Main comparison and local rotation response}{equation.5.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Local rotation response on all 5,000 ImageNet-100 validation images. Left and middle show absolute top-1 and top-5 accuracy. Right shows $100\times $ Jensen--Shannon drift from each model's own $0^\circ $ distribution; the tautological zero-angle JSD point is omitted, leaving the positive and negative branches visually separate. The measured $\pm 30^\circ $ range is expanded to a $120^\circ $ display fan while labels retain the true input angles. Every model receives identical bilinearly rotated inputs.}}{6}{figure.3}\protected@file@percent }
+\newlabel{fig:local-rotation-fans}{{3}{6}{Local rotation response on all 5,000 ImageNet-100 validation images. Left and middle show absolute top-1 and top-5 accuracy. Right shows $100\times $ Jensen--Shannon drift from each model's own $0^\circ $ distribution; the tautological zero-angle JSD point is omitted, leaving the positive and negative branches visually separate. The measured $\pm 30^\circ $ range is expanded to a $120^\circ $ display fan while labels retain the true input angles. Every model receives identical bilinearly rotated inputs}{figure.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Tokenizer geometry and positional-signal ablation under the aligned 20-epoch ImageNet-100 recipe. Geometry symbols follow Sec.~3.3. $\Delta $ is the percentage-point change from Standard. Top-5 is taken at the best-top-1 epoch.}}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:tokenizer}{{2}{7}{Tokenizer geometry and positional-signal ablation under the aligned 20-epoch ImageNet-100 recipe. Geometry symbols follow Sec.~3.3. $\Delta $ is the percentage-point change from Standard. Top-5 is taken at the best-top-1 epoch}{table.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Tokenizer and Image \textsc  {Look}{} ablation}{7}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Directions versus ring resolution.}{7}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Feature \textsc  {Look}{} sharing span}{7}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Learned directed fields}{7}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion}{7}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}What the ablations establish}{7}{subsection.6.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Feature \textsc  {Look}{} probe-sharing ablation. Purple uses PE+Feature \textsc  {Look}{}; blue additionally enables Image \textsc  {Look}{}. The lower panel reports the architectural number of probe evaluations. All values are single-seed 20-epoch results.}}{8}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:center-sharing}{{4}{8}{Feature \look {} probe-sharing ablation. Purple uses PE+Feature \look {}; blue additionally enables Image \look {}. The lower panel reports the architectural number of probe evaluations. All values are single-seed 20-epoch results}{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Limitations}{8}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Next validation}{8}{subsection.6.3}\protected@file@percent }
+\bibstyle{plainnat}
+\bibdata{references}
+\bibcite{beyer2023flexivit}{{1}{2023}{{Beyer et~al.}}{{Beyer, Izmailov, Kolesnikov, Caron, Kornblith, Zhai, Minderer, Tschannen, Alabdulmohsin, and Pavetic}}}
+\bibcite{chen2026equivit}{{2}{2026}{{Chen et~al.}}{{Chen, Du, Lieffrig, Dvornek, and Onofrey}}}
+\bibcite{chu2021cpvt}{{3}{2021}{{Chu et~al.}}{{Chu, Tian, Zhang, Wang, and Shen}}}
+\bibcite{cohen2016gcnn}{{4}{2016}{{Cohen and Welling}}{{}}}
+\bibcite{dosovitskiy2021vit}{{5}{2021}{{Dosovitskiy et~al.}}{{Dosovitskiy, Beyer, Kolesnikov, Weissenborn, Zhai, Unterthiner, Dehghani, Minderer, Heigold, Gelly, Uszkoreit, and Houlsby}}}
+\bibcite{havtorn2023msvit}{{6}{2023}{{Havtorn et~al.}}{{Havtorn, Royer, Blankevoort, and Bejnordi}}}
+\bibcite{heo2024ropevit}{{7}{2024}{{Heo et~al.}}{{Heo, Park, Han, and Yun}}}
+\bibcite{hoogeboom2018hexaconv}{{8}{2018}{{Hoogeboom et~al.}}{{Hoogeboom, Peters, Cohen, and Welling}}}
+\bibcite{karella2024harmformer}{{9}{2024}{{Karella et~al.}}{{Karella, Harmanec, Kotera, Bla{\v {z}}ek, and {\v {S}}roubek}}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Learned parameters from the best dual-\textsc  {Look}{} model (\ensuremath  {\mathcal  {G}_{6,3}} + PE + Image \textsc  {Look}{} + G3 Feature \textsc  {Look}{}). Left: per-layer, per-head RMS magnitude for Image and Feature \textsc  {Look}{}, shown with separate color scales. Right: the three layer--head fields with the largest angular contrast from each branch, measured after removing the mean of every radial ring. Each signed $4\times 12$ map is shown separately rather than mixing heads as RGB. G3 reuses one pose probe for each consecutive three-layer group, while every active layer retains its own output field. Nonuniform fields are an implementation-level observation, not a causal interpretability claim.}}{9}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:look-fields}{{5}{9}{Learned parameters from the best dual-\look {} model (\geom {6}{3} + PE + Image \look {} + G3 Feature \look {}). Left: per-layer, per-head RMS magnitude for Image and Feature \look {}, shown with separate color scales. Right: the three layer--head fields with the largest angular contrast from each branch, measured after removing the mean of every radial ring. Each signed $4\times 12$ map is shown separately rather than mixing heads as RGB. G3 reuses one pose probe for each consecutive three-layer group, while every active layer retains its own output field. Nonuniform fields are an implementation-level observation, not a causal interpretability claim}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{9}{section.7}\protected@file@percent }
+\bibcite{kundu2025steerable}{{10}{2025}{{Kundu and Kondor}}{{}}}
+\bibcite{liu2021swin}{{11}{2021}{{Liu et~al.}}{{Liu, Lin, Cao, Hu, Wei, Zhang, Lin, and Guo}}}
+\bibcite{pu2023arc}{{12}{2023}{{Pu et~al.}}{{Pu, Wang, Xia, Han, Wang, Gan, Wang, Song, and Huang}}}
+\bibcite{rojasgomez2024shiftequiv}{{13}{2024}{{Rojas-Gomez et~al.}}{{Rojas-Gomez, Lim, Do, and Yeh}}}
+\bibcite{touvron2021deit}{{14}{2021}{{Touvron et~al.}}{{Touvron, Cord, Douze, Massa, Sablayrolles, and J{\'e}gou}}}
+\bibcite{worrall2017harmonic}{{15}{2017}{{Worrall et~al.}}{{Worrall, Garbin, Turmukhambetov, and Brostow}}}
+\bibcite{wu2021irpe}{{16}{2021}{{Wu et~al.}}{{Wu, Peng, Chen, Fu, and Chao}}}
+\bibcite{xu2023e2vit}{{17}{2023}{{Xu et~al.}}{{Xu, Yang, Liu, and He}}}
+\bibcite{zhou2017orn}{{18}{2017}{{Zhou et~al.}}{{Zhou, Ye, Qiu, and Jiao}}}
+\gdef \@abspage@last{10}

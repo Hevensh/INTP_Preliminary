@@ -11,17 +11,6 @@ references/
 visualization/
 imgs/
 downloads/
-# Manuscript and editable sources are versioned; local papers/caches are not.
-essay_docu/*.aux
-essay_docu/*.log
-essay_docu/*.out
-essay_docu/*.bbl
-essay_docu/*.blg
-essay_docu/*.synctex.gz
-essay_docu/figure_sources/architecture_components/assets/
-essay_docu/figure_sources/legacy_and_supplementary_figures/
-essay_docu/figure_sources/candidate_paper_figures/
-essay_docu/figure_sources/legacy_*
 # Local extraction, rendering QA, and one-off scholarship figure helpers.
 tmp/
 scripts/figures/

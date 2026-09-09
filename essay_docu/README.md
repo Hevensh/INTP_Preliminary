@@ -48,9 +48,10 @@ angle/scale generalization, and downstream-task experiments remain future work.
 
 ## Git synchronization
 
-The manuscript, saved PDF, bibliography, figures, editable figure sources and
-analysis notes are versioned. Downloaded third-party papers, temporary render
-files, LaTeX caches, and legacy/candidate figure archives remain local.
+The whole paper directory is versioned, including figures, editable sources,
+analysis notes, and legacy/candidate figures. There is no paper-specific ignore
+rule. Repository-wide rules still exclude downloaded references, temporary
+directories, Python caches, and model/data artifacts.
 This is a snapshot of the existing draft, not a claim that its results have
 been updated to include every newer experiment. `main.tex` is the current
 manuscript; older Markdown drafts and evidence notes may lag behind it.

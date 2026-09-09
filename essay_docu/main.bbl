@@ -1,0 +1,139 @@
+\begin{thebibliography}{18}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Beyer et~al.(2023)Beyer, Izmailov, Kolesnikov, Caron, Kornblith, Zhai,
+  Minderer, Tschannen, Alabdulmohsin, and Pavetic]{beyer2023flexivit}
+Lucas Beyer, Pavel Izmailov, Alexander Kolesnikov, Mathilde Caron, Simon
+  Kornblith, Xiaohua Zhai, Matthias Minderer, Michael Tschannen, Ibrahim
+  Alabdulmohsin, and Filip Pavetic.
+\newblock Flexivit: One model for all patch sizes.
+\newblock In \emph{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition}, pages 14496--14506, 2023.
+
+\bibitem[Chen et~al.(2026)Chen, Du, Lieffrig, Dvornek, and
+  Onofrey]{chen2026equivit}
+Fuyao Chen, Yuexi Du, El{\`e}onore~V. Lieffrig, Nicha~C. Dvornek, and John~A.
+  Onofrey.
+\newblock Equi-vit: Rotational equivariant vision transformer for robust
+  histopathology analysis.
+\newblock \emph{arXiv preprint arXiv:2601.09130}, 2026.
+
+\bibitem[Chu et~al.(2021)Chu, Tian, Zhang, Wang, and Shen]{chu2021cpvt}
+Xiangxiang Chu, Zhi Tian, Bo~Zhang, Xinlong Wang, and Chunhua Shen.
+\newblock Conditional positional encodings for vision transformers.
+\newblock \emph{arXiv preprint arXiv:2102.10882}, 2021.
+
+\bibitem[Cohen and Welling(2016)]{cohen2016gcnn}
+Taco Cohen and Max Welling.
+\newblock Group equivariant convolutional networks.
+\newblock In \emph{Proceedings of the 33rd International Conference on Machine
+  Learning}, volume~48, pages 2990--2999. PMLR, 2016.
+
+\bibitem[Dosovitskiy et~al.(2021)Dosovitskiy, Beyer, Kolesnikov, Weissenborn,
+  Zhai, Unterthiner, Dehghani, Minderer, Heigold, Gelly, Uszkoreit, and
+  Houlsby]{dosovitskiy2021vit}
+Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn,
+  Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg
+  Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby.
+\newblock An image is worth 16x16 words: Transformers for image recognition at
+  scale.
+\newblock In \emph{International Conference on Learning Representations}, 2021.
+
+\bibitem[Havtorn et~al.(2023)Havtorn, Royer, Blankevoort, and
+  Bejnordi]{havtorn2023msvit}
+Jakob~Drachmann Havtorn, Am{\'e}lie Royer, Tijmen Blankevoort, and
+  Babak~Ehteshami Bejnordi.
+\newblock {MSViT}: Dynamic mixed-scale tokenization for vision transformers.
+\newblock In \emph{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision Workshops}, pages 838--848, 2023.
+
+\bibitem[Heo et~al.(2024)Heo, Park, Han, and Yun]{heo2024ropevit}
+Byeongho Heo, Song Park, Dongyoon Han, and Sangdoo Yun.
+\newblock Rotary position embedding for vision transformer.
+\newblock In \emph{European Conference on Computer Vision}, 2024.
+
+\bibitem[Hoogeboom et~al.(2018)Hoogeboom, Peters, Cohen, and
+  Welling]{hoogeboom2018hexaconv}
+Emiel Hoogeboom, Jorn W.~T. Peters, Taco~S. Cohen, and Max Welling.
+\newblock Hexaconv.
+\newblock In \emph{International Conference on Learning Representations}, 2018.
+
+\bibitem[Karella et~al.(2024)Karella, Harmanec, Kotera, Bla{\v{z}}ek, and
+  {\v{S}}roubek]{karella2024harmformer}
+Tom{\'a}{\v{s}} Karella, Adam Harmanec, Jan Kotera, Jan Bla{\v{z}}ek, and Filip
+  {\v{S}}roubek.
+\newblock Harmformer: Harmonic networks meet transformers for continuous
+  roto-translation equivariance.
+\newblock \emph{arXiv preprint arXiv:2411.03794}, 2024.
+
+\bibitem[Kundu and Kondor(2025)]{kundu2025steerable}
+Soumyabrata Kundu and Risi Kondor.
+\newblock Steerable transformers for volumetric data.
+\newblock \emph{arXiv preprint arXiv:2405.15932}, 2025.
+
+\bibitem[Liu et~al.(2021)Liu, Lin, Cao, Hu, Wei, Zhang, Lin, and
+  Guo]{liu2021swin}
+Ze~Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng Zhang, Stephen Lin, and
+  Baining Guo.
+\newblock Swin transformer: Hierarchical vision transformer using shifted
+  windows.
+\newblock In \emph{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision}, pages 10012--10022, 2021.
+
+\bibitem[Pu et~al.(2023)Pu, Wang, Xia, Han, Wang, Gan, Wang, Song, and
+  Huang]{pu2023arc}
+Yifan Pu, Yiru Wang, Zhuofan Xia, Yizeng Han, Yulin Wang, Weihao Gan, Zidong
+  Wang, Shiji Song, and Gao Huang.
+\newblock Adaptive rotated convolution for rotated object detection.
+\newblock In \emph{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision}, pages 6589--6600, 2023.
+
+\bibitem[Rojas-Gomez et~al.(2024)Rojas-Gomez, Lim, Do, and
+  Yeh]{rojasgomez2024shiftequiv}
+Renan~A. Rojas-Gomez, Teck-Yian Lim, Minh~N. Do, and Raymond~A. Yeh.
+\newblock Making vision transformers truly shift-equivariant.
+\newblock In \emph{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition}, pages 5568--5577, 2024.
+
+\bibitem[Touvron et~al.(2021)Touvron, Cord, Douze, Massa, Sablayrolles, and
+  J{\'e}gou]{touvron2021deit}
+Hugo Touvron, Matthieu Cord, Matthijs Douze, Francisco Massa, Alexandre
+  Sablayrolles, and Herv{\'e} J{\'e}gou.
+\newblock Training data-efficient image transformers \& distillation through
+  attention.
+\newblock In \emph{Proceedings of the 38th International Conference on Machine
+  Learning}, volume 139, pages 10347--10357. PMLR, 2021.
+
+\bibitem[Worrall et~al.(2017)Worrall, Garbin, Turmukhambetov, and
+  Brostow]{worrall2017harmonic}
+Daniel~E. Worrall, Stephan~J. Garbin, Daniyar Turmukhambetov, and Gabriel~J.
+  Brostow.
+\newblock Harmonic networks: Deep translation and rotation equivariance.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition}, pages 5028--5037, 2017.
+
+\bibitem[Wu et~al.(2021)Wu, Peng, Chen, Fu, and Chao]{wu2021irpe}
+Kan Wu, Houwen Peng, Minghao Chen, Jianlong Fu, and Hongyang Chao.
+\newblock Rethinking and improving relative position encoding for vision
+  transformer.
+\newblock In \emph{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision}, pages 10033--10041, 2021.
+
+\bibitem[Xu et~al.(2023)Xu, Yang, Liu, and He]{xu2023e2vit}
+Renjun Xu, Kaifan Yang, Ke~Liu, and Fengxiang He.
+\newblock $e(2)$-equivariant vision transformer.
+\newblock In \emph{Proceedings of the Thirty-Ninth Conference on Uncertainty in
+  Artificial Intelligence}, volume 216 of \emph{Proceedings of Machine Learning
+  Research}, pages 2356--2366. PMLR, 2023.
+
+\bibitem[Zhou et~al.(2017)Zhou, Ye, Qiu, and Jiao]{zhou2017orn}
+Yanzhao Zhou, Qixiang Ye, Qiang Qiu, and Jianbin Jiao.
+\newblock Oriented response networks.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition}, pages 519--528, 2017.
+
+\end{thebibliography}
