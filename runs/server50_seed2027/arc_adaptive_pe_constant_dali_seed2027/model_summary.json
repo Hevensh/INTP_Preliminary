@@ -1,0 +1,8 @@
+{
+  "name": "deit_tiny_patch16_224",
+  "variant": "arc_adaptive_pe",
+  "parameters": 5986145,
+  "trainable_parameters": 5986145,
+  "image_size": 224,
+  "num_classes": 100
+}

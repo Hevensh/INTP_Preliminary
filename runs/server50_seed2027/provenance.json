@@ -1,0 +1,103 @@
+{
+  "source_archive": "results_no_weights.zip",
+  "archive_sha256": "9258794ec6009d40d9cca8fb72d11283292c7bfbcd8e75cecd77df93f715d0cc",
+  "retained_runs": 11,
+  "excluded_zero_epoch_runs": 11,
+  "notes": [
+    "config data_root/output_root replaced with portable placeholders",
+    "runtime retains library and GPU information only; host paths and command lines omitted",
+    "metrics.jsonl and model_summary.json retain all original values; text newline formatting may differ. source_files hashes refer to ZIP member bytes.",
+    "summary history omitted as exact duplicate of metrics.jsonl",
+    "training code has uncommitted changes and is not identified by this data-only commit"
+  ],
+  "source_files": [
+    {
+      "path": "arc_adaptive_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "a1d13c87d9f3d754556ba9aad6c9b0a13d6de4aebb10f256d488fb852bc32925"
+    },
+    {
+      "path": "arc_adaptive_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "91473b224adb5541b0cdf5e98d283f5d45bbb98f987772bc08139152fd9f6a0a"
+    },
+    {
+      "path": "equi_gmr_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "1b64e7e18e6674bb0ba5ed9928fa301f38208958790a25809162ae371b47ea82"
+    },
+    {
+      "path": "equi_gmr_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "b7c73b85d25172bcafb1f2c6689aa0ae148e833aa86c1ad21ac23896ce29c16b"
+    },
+    {
+      "path": "hex_full4d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "05e2af6f99922df49b587cdddcf73792d15513160b37a3a0c841d1d5454947ea"
+    },
+    {
+      "path": "hex_full4d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "111e60ae5e730d76adae9bd0869c1bc8c4d31d6738dfc34a6a3719f57b411c56"
+    },
+    {
+      "path": "hex_full6d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "44601ff91d1092f6015a34fd70066fb5a92576574aad21a2d58d1efcd560e411"
+    },
+    {
+      "path": "hex_full6d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "111e60ae5e730d76adae9bd0869c1bc8c4d31d6738dfc34a6a3719f57b411c56"
+    },
+    {
+      "path": "hex_half4d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "03629a95f335fe9ca1828746ac5fe4e3700b44367c3045f4f52e5a8d8eeea7bf"
+    },
+    {
+      "path": "hex_half4d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "111e60ae5e730d76adae9bd0869c1bc8c4d31d6738dfc34a6a3719f57b411c56"
+    },
+    {
+      "path": "hex_half6d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "715b3812fc0a528aa685199589f5b6fb25837d39b104681b4a720f7f20914104"
+    },
+    {
+      "path": "hex_half6d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "111e60ae5e730d76adae9bd0869c1bc8c4d31d6738dfc34a6a3719f57b411c56"
+    },
+    {
+      "path": "square_full4d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "cd935273e473cb218984692eb2fa2da3e75a20a6fdbf70ac78ef62c7e29e96e3"
+    },
+    {
+      "path": "square_full4d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "d5ece67f2e505fa65830246a3bb071994b5dac74ebae20fcc2bfe0df5939cbf8"
+    },
+    {
+      "path": "square_full6d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "de94bddfc6aeb7d1ef7e0ca3654cc2953e355b2bbb4fb1dedcaf40f52c09ee10"
+    },
+    {
+      "path": "square_full6d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "d5ece67f2e505fa65830246a3bb071994b5dac74ebae20fcc2bfe0df5939cbf8"
+    },
+    {
+      "path": "square_half4d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "1ab47485c9d7f717d232e0063416cb931fc99d563e77d0d1ccbf58e9e5168e46"
+    },
+    {
+      "path": "square_half4d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "d5ece67f2e505fa65830246a3bb071994b5dac74ebae20fcc2bfe0df5939cbf8"
+    },
+    {
+      "path": "square_half6d3r_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "82d000216b649de1f850ed6e8d08fe4ad8e9b2e514f5301d225f34a2833b029a"
+    },
+    {
+      "path": "square_half6d3r_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "d5ece67f2e505fa65830246a3bb071994b5dac74ebae20fcc2bfe0df5939cbf8"
+    },
+    {
+      "path": "vit_base_pe_constant_dali_seed2027/metrics.jsonl",
+      "sha256": "e30bd4027ecb11855684bd2655a364228c4bf6c607735fe40bb9f3484d9ba753"
+    },
+    {
+      "path": "vit_base_pe_constant_dali_seed2027/model_summary.json",
+      "sha256": "eeaba590a3054f16e3fa2593f5aff07d818a5f6e5314e27f5badb257fc60bdc4"
+    }
+  ]
+}

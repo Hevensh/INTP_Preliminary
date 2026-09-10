@@ -1,0 +1,8 @@
+{
+  "name": "deit_tiny_patch16_224",
+  "variant": "rot_square_harmonic_softmax_pe",
+  "parameters": 5463748,
+  "trainable_parameters": 5463748,
+  "image_size": 224,
+  "num_classes": 100
+}

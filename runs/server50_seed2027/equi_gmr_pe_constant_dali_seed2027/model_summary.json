@@ -1,0 +1,8 @@
+{
+  "name": "deit_tiny_patch16_224",
+  "variant": "equi_gmr_pe",
+  "parameters": 5424230,
+  "trainable_parameters": 5424230,
+  "image_size": 224,
+  "num_classes": 100
+}

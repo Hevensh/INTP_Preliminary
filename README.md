@@ -98,6 +98,21 @@ continuous group equivariance.
 
 ## ImageNet-100 results
 
+### Server experiments: 50 epochs, seed 2027
+
+The completed 11-run V100/DALI suite is archived in
+[`runs/server50_seed2027`](runs/server50_seed2027/README.md), including exact
+per-epoch metrics, portable run configs, model parameter counts, runtime versions,
+and source-archive checksums. No dataset images or model weights are uploaded.
+All runs use batch 512, five warmup epochs followed by a constant learning rate
+of 0.0005. The eight MAMS variants use a single K24 scale and PE only.
+Best Top-1: standard ViT **64.70%**, square half6d3r **65.70%**, and
+Hex half4d3r **65.20%**. These are single-seed results, not significance claims.
+Do not directly attribute differences against the older 20-epoch recipe below
+to architecture alone.
+
+### Earlier Kaggle experiments: 20 epochs
+
 All values below come from completed 20-epoch runs with `224x224` inputs on the
 same 100-class ImageNet-100 dataset and a two-T4 training environment.
 
@@ -170,8 +185,9 @@ are documented in
 [`experiments/imagenet100/README.md`](experiments/imagenet100/README.md).
 
 Generated datasets, checkpoints, diagnostic arrays, downloaded papers, and
-training outputs are intentionally excluded from source control. The `runs/`
-index records external experiment provenance without committing large weights.
+bulk training outputs are intentionally excluded from source control. The `runs/`
+index records external experiment provenance; the curated `server50_seed2027/`
+exception includes small, auditable results and configs, never large weights.
 
 ## Project status
 

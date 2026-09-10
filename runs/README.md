@@ -1,5 +1,14 @@
 # ImageNet-100 运行存档索引
 
+## 新增：服务器 50 轮实验（seed 2027）
+
+[完整结果及逐轮数据](server50_seed2027/README.md)已纳入 Git：11 个完成实验，
+V100 32GB、每卡一个任务、batch 512、DALI、5 轮 warmup 后恒定 LR=0.0005。
+八个 MAMS 变体均为 K24 单尺度、r3、PE only，无 Look 和分化。
+最佳 Top-1：ViT 64.70%，Square half6d3r 65.70%，Hex half4d3r 65.20%。
+目录包含逐轮指标、配置、参数量和运行环境摘要；不含数据集原图、权重或旧失败任务。
+这是独立的 50 轮实验组，不能和以下 20 轮结果直接归因比较。
+
 Kaggle Notebooks：[主实验](https://www.kaggle.com/code/hevenshchen/intp-img-littletest)、
 [XV 双 Look 共享跨度](https://www.kaggle.com/code/xiongwutao/intp-img-littletest)、
 [WV 外部等变方法](https://www.kaggle.com/code/wctgy123/intp-img-littletest)

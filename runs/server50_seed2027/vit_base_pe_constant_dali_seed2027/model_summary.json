@@ -1,0 +1,8 @@
+{
+  "name": "deit_tiny_patch16_224",
+  "variant": "deit_tiny",
+  "parameters": 5543716,
+  "trainable_parameters": 5543716,
+  "image_size": 224,
+  "num_classes": 100
+}
