@@ -1,0 +1,22 @@
+{
+  "python": "3.12.11 | packaged by Anaconda, Inc. | (main, Jun  5 2025, 13:09:17) [GCC 11.2.0]",
+  "torch": "2.8.0+cu126",
+  "torchvision": "0.23.0+cu126",
+  "timm": "1.0.29",
+  "cuda_runtime": "12.6",
+  "cudnn": 91002,
+  "gpu_name": "Tesla V100-SXM2-32GB",
+  "gpu_count": 1,
+  "gpu_total_memory_mib": 32501.12,
+  "dali_version": "1.50.0",
+  "distributed": {
+    "world_size": 1,
+    "backend": null,
+    "per_device_batch_size": 512,
+    "global_batch_size": 512,
+    "gradient_accumulation_steps": 1,
+    "effective_global_batch_size": 512
+  },
+  "ge_local_backend": "triton",
+  "ge_local_backend_revision": "indirect-local-fwd-dq-incoming-dkv-v1"
+}

@@ -19,6 +19,8 @@ runs/*
 !runs/README.md
 !runs/server50_seed2027/
 !runs/server50_seed2027/**
+!runs/server_ge50_seed2027/
+!runs/server_ge50_seed2027/**
 diagnostics/results/_smoke_*.json
 diagnostics/results/_smoke_*.pt
 *.pt

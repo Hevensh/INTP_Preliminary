@@ -1,0 +1,8 @@
+{
+  "name": "deit_tiny_patch16_224",
+  "variant": "ge_ablation_square_half_multi",
+  "parameters": 1336956,
+  "trainable_parameters": 1336956,
+  "image_size": 224,
+  "num_classes": 100
+}

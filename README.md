@@ -98,6 +98,17 @@ continuous group equivariance.
 
 ## ImageNet-100 results
 
+### GE internal ablations: 50 epochs, seed 2027
+
+[`runs/server_ge50_seed2027`](runs/server_ge50_seed2027/README.md) archives eight
+completed square/hex, full/half-direction, single/multi-scale runs, with all 400
+epoch records, portable configs, parameter counts, runtime and resume metadata,
+and source checksums. Best Top-1 is **63.08%** (Hex full-six, single scale), with
+**86.70%** Top-5 at that checkpoint. These ~1.33M-parameter explicit-direction GE
+backbones are not parameter-matched to the ~5.5M ViT suite below. Single seed;
+the present multi-scale implementation underperforms its single-scale pair in
+all four comparisons. No weights or dataset images are published.
+
 ### Server experiments: 50 epochs, seed 2027
 
 The completed 11-run V100/DALI suite is archived in
